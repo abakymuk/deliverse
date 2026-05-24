@@ -1,0 +1,136 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [staging]
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false  # Don't cancel mid-deploy; queue instead
+
+jobs:
+  migrate:
+    name: Migrate staging DB
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install Doppler CLI
+        uses: dopplerhq/cli-action@v3
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run migrations against staging DB
+        run: doppler run --token=${{ secrets.DOPPLER_TOKEN_STG }} -- pnpm db:migrate
+        env:
+          DOPPLER_PROJECT: restaurant-platform
+          DOPPLER_CONFIG: stg
+
+  deploy-platform:
+    name: Deploy platform to staging
+    needs: migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_PLATFORM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel env (staging)
+        run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        run: |
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          vercel alias set $DEPLOYMENT_URL admin.staging.yourapp.com --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
+
+  deploy-storefront:
+    name: Deploy storefront to staging
+    needs: migrate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_STOREFRONT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      - name: Pull Vercel env (staging)
+        run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Build
+        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy
+        run: |
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          # Storefront alias is wildcard — Vercel handles routing per-subdomain at the edge
+          vercel alias set $DEPLOYMENT_URL staging.yourapp.com --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
+
+  smoke-test:
+    name: Smoke test staging
+    needs: [deploy-platform, deploy-storefront]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wait for DNS / CDN propagation
+        run: sleep 30
+
+      - name: Platform health check
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://admin.staging.yourapp.com/login)
+          if [ "$STATUS" -ne 200 ]; then
+            echo "Platform health check failed: HTTP $STATUS"
+            exit 1
+          fi
+          echo "Platform OK"
+
+      # Storefront smoke test requires a brand subdomain — skip if no seed brands deployed yet
+      # Uncomment when ready:
+      # - name: Storefront health check
+      #   run: |
+      #     STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pizza-express.staging.yourapp.com/)
+      #     if [ "$STATUS" -ne 200 ]; then
+      #       echo "Storefront health check failed: HTTP $STATUS"
+      #       exit 1
+      #     fi
+      #     echo "Storefront OK"
