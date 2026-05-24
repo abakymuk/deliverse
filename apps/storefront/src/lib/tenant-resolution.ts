@@ -41,21 +41,21 @@ export function extractBrandSlug(host: string | null): string | null {
   }
 
   // Strip port (for local dev like localhost:3001)
-  const hostWithoutPort = host.split(':')[0];
-  const baseWithoutPort = baseDomain.split(':')[0];
+  const [hostWithoutPort = ''] = host.split(':');
+  const [baseWithoutPort = ''] = baseDomain.split(':');
 
   if (hostWithoutPort === baseWithoutPort) {
     return null; // Root domain, no brand
   }
 
-  if (!hostWithoutPort?.endsWith(`.${baseWithoutPort}`)) {
+  if (!hostWithoutPort.endsWith(`.${baseWithoutPort}`)) {
     return null; // Not a subdomain of our base
   }
 
   const subdomain = hostWithoutPort.slice(0, -(baseWithoutPort.length + 1));
   // Subdomain might have multiple parts (e.g., "www.pizza-express")
   // Take the first segment as brand
-  const brandSlug = subdomain.split('.')[0];
+  const [brandSlug = ''] = subdomain.split('.');
 
   // Reserved subdomains that are not brand storefronts
   const RESERVED = new Set(['www', 'admin', 'api', 'app']);

@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { signIn } from '@/lib/auth-client';
 
 export function LoginForm() {
@@ -44,7 +45,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push(next);
+      router.push(next as Route);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -91,7 +92,7 @@ export function LoginForm() {
               Password
             </label>
             <Link
-              href="/forgot-password"
+              href={'/forgot-password' as Route}
               className="text-sm text-[var(--color-muted-foreground)] hover:underline"
             >
               Forgot password?

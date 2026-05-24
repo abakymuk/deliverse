@@ -120,7 +120,8 @@ export const platformAuth = betterAuth({
       organizationLimit: 10, // Max tenants per user (e.g., chain franchise manager)
       membershipLimit: 100, // Max members per tenant in v1
       creatorRole: 'owner',
-      roles: ['owner', 'manager', 'staff', 'viewer'],
+      // TODO: define custom roles (manager/staff/viewer) via createAccessControl.
+      // Using BA defaults for now: owner, admin, member.
     }),
   ],
 });

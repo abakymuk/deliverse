@@ -15,6 +15,7 @@
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
+import type { Route } from 'next';
 import { signIn, emailOtp } from '@/lib/auth-client';
 
 type Mode = 'otp' | 'password';
@@ -48,7 +49,7 @@ export function LoginForm() {
 
       // Redirect to verify-otp page with email in query
       const params = new URLSearchParams({ email, next });
-      router.push(`/verify-otp?${params.toString()}`);
+      router.push(`/verify-otp?${params.toString()}` as Route);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -73,7 +74,7 @@ export function LoginForm() {
         return;
       }
 
-      router.push(next);
+      router.push(next as Route);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
@@ -186,7 +187,7 @@ export function LoginForm() {
 
       <p className="text-center text-sm text-[var(--color-muted-foreground)]">
         Don't have an account?{' '}
-        <Link href="/signup" className="underline">
+        <Link href={'/signup' as Route} className="underline">
           Sign up
         </Link>
       </p>

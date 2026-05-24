@@ -16,6 +16,7 @@
     "@rp/db": "workspace:*",
     "@rp/ui": "workspace:*",
     "better-auth": "^1.4.0",
+    "drizzle-orm": "^0.45.2",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -27,6 +28,7 @@
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "@tailwindcss/postcss": "^4.0.0-beta.7",
     "tailwindcss": "^4.0.0-beta.7",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"

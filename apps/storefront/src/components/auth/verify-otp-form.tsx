@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { emailOtp } from '@/lib/auth-client';
+import type { Route } from 'next';
+import { signIn, emailOtp } from '@/lib/auth-client';
 
 export function VerifyOtpForm() {
   const router = useRouter();
@@ -20,14 +21,14 @@ export function VerifyOtpForm() {
     setLoading(true);
 
     try {
-      const result = await emailOtp.signIn({ email, otp: code });
+      const result = await signIn.emailOtp({ email, otp: code });
 
       if (result.error) {
         setError(result.error.message ?? 'Invalid code');
         return;
       }
 
-      router.push(next);
+      router.push(next as Route);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Unknown error');
     } finally {
