@@ -9,6 +9,7 @@ dist/
 build/
 out/
 coverage/
+*.tsbuildinfo
 
 # Environment
 .env

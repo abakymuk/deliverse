@@ -142,10 +142,16 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(gel@2.2.0)(kysely@0.28.17)(postgres@3.4.9)
+      zod:
+        specifier: ^4.0.0
+        version: 4.4.3
     devDependencies:
       '@rp/typescript-config':
         specifier: workspace:*
         version: link:../typescript-config
+      '@types/node':
+        specifier: ^22.10.0
+        version: 22.19.19
       typescript:
         specifier: ^5.7.0
         version: 5.9.3

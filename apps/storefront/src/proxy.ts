@@ -3,7 +3,7 @@ import { getSessionCookie } from 'better-auth/cookies';
 import { extractBrandSlug } from '@/lib/tenant-resolution';
 
 /**
- * Storefront middleware:
+ * Storefront proxy (Next 15.5+; was middleware):
  * 1. Extract brand slug from Host header
  * 2. Inject brand slug as header for downstream
  * 3. Check session for protected routes
@@ -11,7 +11,7 @@ import { extractBrandSlug } from '@/lib/tenant-resolution';
  * If no valid brand slug → redirect to base domain (marketing site)
  *
  * NOTE: full brand DB lookup happens in server components (cached).
- * Middleware only handles the routing decision based on slug presence.
+ * Proxy only handles the routing decision based on slug presence.
  */
 
 const PUBLIC_PATHS = [
@@ -25,7 +25,7 @@ const PUBLIC_PATHS = [
 
 const PROTECTED_PATHS = ['/account', '/orders'];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const host = request.headers.get('host');
 
@@ -52,6 +52,13 @@ export function middleware(request: NextRequest) {
   // Inject brand slug as header for server components
   const headers = new Headers(request.headers);
   headers.set('x-brand-slug', brandSlug);
+
+  // Public paths: skip auth, pass through with brand header
+  if (
+    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))
+  ) {
+    return NextResponse.next({ headers });
+  }
 
   // Auth check for protected paths
   if (PROTECTED_PATHS.some((p) => pathname.startsWith(p))) {

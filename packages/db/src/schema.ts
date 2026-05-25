@@ -358,7 +358,7 @@ export const brands = pgTable('brands', {
     .notNull()
     .references(() => tenants.id, { onDelete: 'cascade' }),
 
-  // Used for subdomain: {slug}.yourapp.com
+  // Used for subdomain: {slug}.deliverse.app
   // Globally unique (not just per-tenant) because subdomains are global.
   slug: text('slug').notNull(),
 

@@ -38,7 +38,7 @@ test.describe('Storefront Auth — OTP flow', () => {
 });
 
 test.describe('Cross-brand recognition (same tenant)', () => {
-  test('disclosure shown on sibling brand', async ({ page }) => {
+  test('disclosure shown on sibling brand', async () => {
     // User signs up at pizza-express
     // Visits burger-heaven (same tenant)
     // Should see disclosure that account works across brands
@@ -48,7 +48,7 @@ test.describe('Cross-brand recognition (same tenant)', () => {
 });
 
 test.describe('Tenant isolation', () => {
-  test('same email at different tenants are different accounts', async ({ page }) => {
+  test('same email at different tenants are different accounts', async () => {
     // John signs up at tenant A's pizza-express
     // John signs up at tenant B's other-brand with same email
     // Should be two separate accounts

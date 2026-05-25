@@ -1,7 +1,7 @@
 /**
  * Tenant resolution: subdomain → brand → tenant
  *
- * Storefront URLs are `{brand-slug}.yourapp.com`.
+ * Storefront URLs are `{brand-slug}.deliverse.app`.
  * Every request needs to resolve which brand (and thus which tenant)
  * the user is interacting with.
  *
@@ -26,9 +26,9 @@ export type BrandContext = {
  * Extract brand slug from Host header.
  *
  * Examples:
- *   "pizza-express.yourapp.com" → "pizza-express"
+ *   "pizza-express.deliverse.app" → "pizza-express"
  *   "pizza-express.localhost:3001" → "pizza-express"
- *   "yourapp.com" → null (root domain, no brand)
+ *   "deliverse.app" → null (root domain, no brand)
  *
  * Uses NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN to determine the base.
  */

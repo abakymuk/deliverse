@@ -7,13 +7,13 @@
 
 Customer-facing storefront for restaurant guests.
 
-- URL: `{brand-slug}.yourapp.com` (production), `{brand-slug}.localhost:3001` (dev)
+- URL: `{brand-slug}.deliverse.app` (production), `{brand-slug}.localhost:3001` (dev)
 - Audience: end users / guests
 - Auth: Better-Auth instance #2, email OTP (primary) + password + Google OAuth
 
 ## Critical: tenant resolution
 
-Every request goes through `src/middleware.ts` which:
+Every request goes through `src/proxy.ts` which:
 1. Parses brand slug from Host header
 2. Validates the brand exists
 3. Injects `x-brand-slug` header for server components
@@ -55,7 +55,7 @@ src/
 │   ├── auth.ts
 │   ├── auth-client.ts
 │   └── tenant-resolution.ts  ← Subdomain → brand → tenant
-└── middleware.ts
+└── proxy.ts
 ```
 
 ## Local dev setup
@@ -74,7 +74,7 @@ Seed data creates the test brands `pizza-express` and `burger-heaven`.
 
 ## Gotchas
 
-- Cookies scoped to exact subdomain — DO NOT use wildcard `.yourapp.com`.
+- Cookies scoped to exact subdomain — DO NOT use wildcard `.deliverse.app`.
 - OTP email branding must include brand context (logo, name) — passed from request.
 - Cross-brand recognition: when user from `pizza-express` (Tenant X) visits `burger-heaven` (also Tenant X), show disclosure: "Burger Heaven is part of {Tenant Name}'s family — your account works here."
 - `headers()` is async. Always await.

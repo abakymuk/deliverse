@@ -58,9 +58,9 @@ Tenant (business entity, billing unit)
 
 ```
 apps/
-  platform/      → admin.yourapp.com
+  platform/      → admin.deliverse.app
                    (platform staff + tenant staff)
-  storefront/    → {brand-slug}.yourapp.com
+  storefront/    → {brand-slug}.deliverse.app
                    (end users, tenant-scoped identity, brand-themed UI)
 packages/
   db/            → shared Drizzle schema
@@ -68,15 +68,15 @@ packages/
   ui/            → shared shadcn-based design system
 ```
 
-**Why two apps:** security boundary = network boundary. Cookies on `admin.*` cannot leak to `*.yourapp.com` storefronts by design. Cannot be undone by a bug in an `if` statement.
+**Why two apps:** security boundary = network boundary. Cookies on `admin.*` cannot leak to `*.deliverse.app` storefronts by design. Cannot be undone by a bug in an `if` statement.
 
 ## 6. Acceptance Criteria
 
 1. End user `john@x.com` can have separate accounts at tenant A and tenant B. Sessions and logins on one do not affect the other.
-2. End user `john@x.com` has ONE account at tenant A, usable across all brands of tenant A. Logging in at `pizza-express.yourapp.com` and `burger-heaven.yourapp.com` (same tenant) resolves to same `tenant_end_user_id`.
-3. Platform staff login at `admin.yourapp.com` via email/password or Google. Session: 7d inactivity / 30d absolute max.
-4. End user login at `{brand}.yourapp.com` via email OTP (6-digit, 10min TTL) or Google. Session: 30d inactivity.
-5. End user navigating to `admin.yourapp.com` sees generic 404, never an authorized/unauthorized leak.
+2. End user `john@x.com` has ONE account at tenant A, usable across all brands of tenant A. Logging in at `pizza-express.deliverse.app` and `burger-heaven.deliverse.app` (same tenant) resolves to same `tenant_end_user_id`.
+3. Platform staff login at `admin.deliverse.app` via email/password or Google. Session: 7d inactivity / 30d absolute max.
+4. End user login at `{brand}.deliverse.app` via email OTP (6-digit, 10min TTL) or Google. Session: 30d inactivity.
+5. End user navigating to `admin.deliverse.app` sees generic 404, never an authorized/unauthorized leak.
 6. Tenant staff querying brand they don't have membership for → 404, never 403.
 7. Tenant soft-delete: 30-day grace → hard-delete cascades to locations, brands, tenant_end_users.
 8. OTP rate limits: 1 request per 60s per email per tenant; 5 failed attempts → 15min cooldown.
@@ -138,7 +138,7 @@ verification_tokens      id, identifier (email), token_hash,
 
 ## 9. Route Map
 
-**Platform (`admin.yourapp.com`):**
+**Platform (`admin.deliverse.app`):**
 ```
 /login                          email/password + Google
 /signup                         invite-only (?token=...)
@@ -151,7 +151,7 @@ verification_tokens      id, identifier (email), token_hash,
 /tenants/[slug]/...             tenant context
 ```
 
-**Storefront (`{brand-slug}.yourapp.com`):**
+**Storefront (`{brand-slug}.deliverse.app`):**
 ```
 /                               public, brand-themed landing
 /login                          email input → /verify-otp
@@ -168,7 +168,7 @@ verification_tokens      id, identifier (email), token_hash,
 **Scenario:** John has account at Pizza Express. Visits Burger Heaven (same tenant) for first time.
 
 **Flow:**
-1. John lands on `burger-heaven.yourapp.com/login`
+1. John lands on `burger-heaven.deliverse.app/login`
 2. Enters email `john@x.com`
 3. Backend: resolve brand → tenant; lookup `(tenant_id, email)` in `tenant_end_users`
 4. Found existing record!
@@ -189,7 +189,7 @@ verification_tokens      id, identifier (email), token_hash,
 4. **Tenant delete cascade:** soft-delete → 30d → hard-delete locations, brands, tenant_end_users, memberships. Platform_user records persist.
 5. **OAuth account linking:** end user signed up via OTP and later logs in via Google with same email → auto-link **only if** Google `email_verified=true` AND we already verified OTP-side email. Otherwise prompt explicit consent.
 6. **Email change:** new + old email both receive notification (security best practice).
-7. **Cookie scoping:** `Domain=admin.yourapp.com` (NOT `*.yourapp.com`), `SameSite=Lax`, `Secure`, `HttpOnly`. Storefront cookies scoped to `{brand}.yourapp.com` only.
+7. **Cookie scoping:** `Domain=admin.deliverse.app` (NOT `*.deliverse.app`), `SameSite=Lax`, `Secure`, `HttpOnly`. Storefront cookies scoped to `{brand}.deliverse.app` only.
 8. **OTP rate limit storage:** Redis counter with sliding window (`otp:request:{tenant_id}:{email}` and `otp:fail:{tenant_id}:{email}:{token_id}`).
 9. **Signup race condition:** two concurrent requests with same (tenant_id, email). DB constraint is source of truth; handle violation as "already registered".
 10. **Tenant member removed:** find all active sessions for that platform_user under this tenant → delete sessions.
@@ -226,7 +226,7 @@ All auth screens built on shadcn/ui blocks:
 | 2026-05-23 | Passwordless for end users (OTP + OAuth) | 2026 industry consensus; restaurant guests rarely log in; NIST guidance; less code |
 | 2026-05-23 | Tenant-scoped end users (not brand-scoped) | Unified customer base across brands; tenant-wide loyalty; matches multi-unit chain operator expectations |
 | 2026-05-23 | Cross-brand disclosure required | GDPR/CCPA compliance; customer trust; avoids "creepy" surprise |
-| 2026-05-23 | Subdomain `{brand}.yourapp.com` in v1 | Custom domains add SSL + cookie complexity; v2 problem |
+| 2026-05-23 | Subdomain `{brand}.deliverse.app` in v1 | Custom domains add SSL + cookie complexity; v2 problem |
 | 2026-05-23 | Single `sessions` table with discriminator | Simpler queries, easier observability |
 | 2026-05-23 | OTP via email only in v1 | NIST deprecates SMS OTP; phone OTP not justified |
 | 2026-05-23 | Passkeys deferred to v2 | Phased migration: OTP first, then enrollment prompt post-login |
@@ -238,7 +238,7 @@ All auth screens built on shadcn/ui blocks:
 1. ✅ Spec v3 (this document)
 2. ⏭ Drizzle schema (full table definitions, indexes, FKs, with reasoning per field)
 3. ⏭ Better-Auth configuration for both apps
-4. ⏭ Tenant resolution middleware (subdomain → brand_id → tenant_id)
+4. ⏭ Tenant resolution proxy (subdomain → brand_id → tenant_id)
 5. ⏭ Implementation: platform auth flow
 6. ⏭ Implementation: storefront auth flow with cross-brand recognition
 7. ⏭ Integration tests (edge cases §11)

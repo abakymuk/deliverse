@@ -60,10 +60,10 @@ Or use Chrome / Firefox, which auto-resolve `*.localhost`.
 ## Structure
 
 ```
-restaurant-platform/
+deliverse/
 ├── apps/
-│   ├── platform/   → admin.yourapp.com (platform staff + tenant operators)
-│   └── storefront/ → {brand}.yourapp.com (end users)
+│   ├── platform/   → admin.deliverse.app (platform staff + tenant operators)
+│   └── storefront/ → {brand}.deliverse.app (end users)
 ├── packages/
 │   ├── db/             → Drizzle schema + client
 │   ├── ui/             → shadcn components (shared)

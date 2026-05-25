@@ -45,13 +45,13 @@
 ### Two-app monorepo
 
 ```
-restaurant-platform/
+deliverse/
 ├── apps/
-│   ├── platform/    → admin.yourapp.com
+│   ├── platform/    → admin.deliverse.app
 │   │                  Audience: platform staff + tenant operators
 │   │                  Auth: Better-Auth instance #1 (password + Google OAuth)
 │   │
-│   └── storefront/  → {brand-slug}.yourapp.com
+│   └── storefront/  → {brand-slug}.deliverse.app
 │                      Audience: restaurant guests
 │                      Auth: Better-Auth instance #2 (OTP + password + Google)
 │                      Tenant resolution: subdomain → brand → tenant
@@ -138,7 +138,7 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 - ✅ Auth architecture spec v3 (docs/auth-spec.md)
 - ✅ Drizzle schema (packages/db/src/schema.ts)
 - 🚧 Better-Auth config for both apps
-- 🚧 Tenant resolution middleware (storefront)
+- 🚧 Tenant resolution proxy (storefront)
 - ⏭ Login/signup pages with shadcn blocks
 - ⏭ Email OTP delivery via Resend
 - ⏭ Tenant onboarding flow (invite-only signup)
@@ -159,7 +159,7 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 > **Add to this list whenever something burns you.**
 
-- **Cookie domain on subdomains:** use `Domain=admin.yourapp.com` (NOT `.yourapp.com`). Wildcard domain leaks cookies between platform and storefronts.
+- **Cookie domain on subdomains:** use `Domain=admin.deliverse.app` (NOT `.deliverse.app`). Wildcard domain leaks cookies between platform and storefronts.
 - **Drizzle migration sync:** running `drizzle-kit generate` does NOT push. Use `migrate` explicitly. `push` only for local dev.
 - **Better-Auth schema generation:** `npx @better-auth/cli generate` regenerates. Custom additions go in app-level schema, not BA-generated files.
 - **Server actions in production:** they require `'use server'` at top of file or directly above function. Missing this fails silently in dev, breaks in prod.
@@ -249,8 +249,8 @@ Three long-lived environments, strict promotion order: **dev → stg → prd**. 
 | Env | Domain | DB branch | Doppler config | Deploy trigger |
 |---|---|---|---|---|
 | dev | localhost | Neon `dev` | `dev` | local only |
-| stg | `*.staging.yourapp.com` | Neon `staging` | `stg` | push to `staging` |
-| prd | `*.yourapp.com` | Neon `production` | `prd` | push to `main` + manual approval |
+| stg | `*.staging.deliverse.app` | Neon `staging` | `stg` | push to `staging` |
+| prd | `*.deliverse.app` | Neon `production` | `prd` | push to `main` + manual approval |
 
 **Hard rules:**
 

@@ -7,7 +7,7 @@
 
 Admin panel for platform staff and tenant operators (restaurant owners, managers).
 
-- URL: `admin.yourapp.com` (production), `localhost:3000` (dev)
+- URL: `admin.deliverse.app` (production), `localhost:3000` (dev)
 - Audience: NOT end users / guests
 - Auth: Better-Auth instance #1, email/password + Google OAuth, NO OTP
 
@@ -35,13 +35,13 @@ src/
 ├── lib/
 │   ├── auth.ts           ← Server-side BA instance (re-export)
 │   └── auth-client.ts    ← Client-side BA helpers
-└── middleware.ts         ← Session check, redirect to /login
+└── proxy.ts         ← Session check, redirect to /login
 ```
 
 ## Conventions
 
 - Server components by default. `'use client'` only for forms and interactive UI.
-- Route protection: handled in middleware (cookie check) + layout (full session check).
+- Route protection: handled in proxy (cookie check) + layout (full session check).
 - Don't query DB from client components. Use server actions or RSC.
 - Forms use react-hook-form + zod for validation.
 
@@ -54,6 +54,6 @@ src/
 
 ## Gotchas
 
-- Cookie scope: `Domain=admin.yourapp.com` only. NEVER wildcard.
+- Cookie scope: `Domain=admin.deliverse.app` only. NEVER wildcard.
 - Better-Auth route handler at `api/auth/[...all]` — don't move it.
 - `headers()` is async in Next.js 15. Always await.

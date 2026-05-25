@@ -54,9 +54,9 @@ A tenant can operate multiple kitchens (locations) and run multiple brands (cons
 ## Request flow: storefront login
 
 ```
-1. Guest visits pizza-express.yourapp.com/login
-2. middleware.ts: extract "pizza-express" from Host header
-3. middleware.ts: inject x-brand-slug header
+1. Guest visits pizza-express.deliverse.app/login
+2. proxy.ts: extract "pizza-express" from Host header
+3. proxy.ts: inject x-brand-slug header
 4. Server component / layout: getBrandContext("pizza-express")
    → DB lookup brand + tenant
 5. Render brand-themed login form

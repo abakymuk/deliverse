@@ -43,7 +43,7 @@ We need a deployment platform and secrets management strategy that:
 - Adding a new secret = one place to add it; auto-syncs everywhere.
 - Audit trail (who changed what, when) — useful for security review.
 - Local dev uses `doppler run -- pnpm dev`, no `.env.local` to forget to update.
-- Vercel handles wildcard subdomains (`*.yourapp.com`, `*.staging.yourapp.com`) natively for the storefront multi-tenant pattern.
+- Vercel handles wildcard subdomains (`*.deliverse.app`, `*.staging.deliverse.app`) natively for the storefront multi-tenant pattern.
 - Preview deploys come for free with Vercel.
 
 ### Negative

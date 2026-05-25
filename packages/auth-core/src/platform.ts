@@ -1,5 +1,5 @@
 /**
- * Better-Auth configuration for the PLATFORM app (admin.yourapp.com)
+ * Better-Auth configuration for the PLATFORM app (admin.deliverse.app)
  *
  * Audience: platform staff + tenant operators
  * Methods: email/password + Google OAuth
@@ -99,7 +99,7 @@ export const platformAuth = betterAuth({
   },
 
   // === Cookie config ===
-  // CRITICAL: scoped to admin.yourapp.com only, NOT wildcard.
+  // CRITICAL: scoped to admin.deliverse.app only, NOT wildcard.
   advanced: {
     cookiePrefix: 'rp_platform',
     crossSubDomainCookies: {
