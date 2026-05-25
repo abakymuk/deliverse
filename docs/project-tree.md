@@ -44,7 +44,7 @@ deliverse/
 │   │   │   ├── lib/
 │   │   │   │   ├── auth.ts
 │   │   │   │   └── auth-client.ts
-│   │   │   └── middleware.ts
+│   │   │   └── proxy.ts
 │   │   └── tests/e2e/auth.spec.ts
 │   │
 │   └── storefront/                 ← {brand}.deliverse.app
@@ -75,7 +75,7 @@ deliverse/
 │       │   │   ├── auth.ts
 │       │   │   ├── auth-client.ts
 │       │   │   └── tenant-resolution.ts  ← THE key piece
-│       │   └── middleware.ts
+│       │   └── proxy.ts
 │       └── tests/e2e/auth.spec.ts
 │
 ├── packages/

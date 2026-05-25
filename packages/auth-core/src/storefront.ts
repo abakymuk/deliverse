@@ -11,7 +11,7 @@
  *   tenant_end_user_verifications → "verification"
  *
  * CRITICAL: end users are tenant-scoped. Tenant resolution happens in
- * middleware BEFORE auth, and tenantId is injected into the request context.
+ * proxy BEFORE auth, and tenantId is injected into the request context.
  */
 
 import { betterAuth } from 'better-auth';
@@ -32,7 +32,7 @@ export const storefrontAuth = betterAuth({
   }),
 
   secret: process.env.BETTER_AUTH_SECRET,
-  // baseURL is set dynamically per-tenant in middleware
+  // baseURL is set dynamically per-tenant in proxy
 
   user: {
     fields: {
@@ -43,7 +43,7 @@ export const storefrontAuth = betterAuth({
       tenantId: {
         type: 'string',
         required: true,
-        input: false, // Set by middleware, not by user
+        input: false, // Set by proxy, not by user
       },
       deletedAt: {
         type: 'date',

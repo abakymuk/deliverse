@@ -35,13 +35,13 @@ src/
 ├── lib/
 │   ├── auth.ts           ← Server-side BA instance (re-export)
 │   └── auth-client.ts    ← Client-side BA helpers
-└── middleware.ts         ← Session check, redirect to /login
+└── proxy.ts         ← Session check, redirect to /login
 ```
 
 ## Conventions
 
 - Server components by default. `'use client'` only for forms and interactive UI.
-- Route protection: handled in middleware (cookie check) + layout (full session check).
+- Route protection: handled in proxy (cookie check) + layout (full session check).
 - Don't query DB from client components. Use server actions or RSC.
 - Forms use react-hook-form + zod for validation.
 

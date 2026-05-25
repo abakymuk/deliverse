@@ -13,7 +13,7 @@ Customer-facing storefront for restaurant guests.
 
 ## Critical: tenant resolution
 
-Every request goes through `src/middleware.ts` which:
+Every request goes through `src/proxy.ts` which:
 1. Parses brand slug from Host header
 2. Validates the brand exists
 3. Injects `x-brand-slug` header for server components
@@ -55,7 +55,7 @@ src/
 │   ├── auth.ts
 │   ├── auth-client.ts
 │   └── tenant-resolution.ts  ← Subdomain → brand → tenant
-└── middleware.ts
+└── proxy.ts
 ```
 
 ## Local dev setup

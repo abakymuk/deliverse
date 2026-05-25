@@ -335,7 +335,7 @@ Vercel needs both:
 Both must be present.
 
 ### "Storefront returns 500 with 'No brand specified'"
-DNS resolves but middleware rejects. Check `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` env var matches actual base domain.
+DNS resolves but proxy rejects. Check `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` env var matches actual base domain.
 
 ---
 

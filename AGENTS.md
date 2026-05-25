@@ -138,7 +138,7 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 - ✅ Auth architecture spec v3 (docs/auth-spec.md)
 - ✅ Drizzle schema (packages/db/src/schema.ts)
 - 🚧 Better-Auth config for both apps
-- 🚧 Tenant resolution middleware (storefront)
+- 🚧 Tenant resolution proxy (storefront)
 - ⏭ Login/signup pages with shadcn blocks
 - ⏭ Email OTP delivery via Resend
 - ⏭ Tenant onboarding flow (invite-only signup)

@@ -238,7 +238,7 @@ All auth screens built on shadcn/ui blocks:
 1. ✅ Spec v3 (this document)
 2. ⏭ Drizzle schema (full table definitions, indexes, FKs, with reasoning per field)
 3. ⏭ Better-Auth configuration for both apps
-4. ⏭ Tenant resolution middleware (subdomain → brand_id → tenant_id)
+4. ⏭ Tenant resolution proxy (subdomain → brand_id → tenant_id)
 5. ⏭ Implementation: platform auth flow
 6. ⏭ Implementation: storefront auth flow with cross-brand recognition
 7. ⏭ Integration tests (edge cases §11)
