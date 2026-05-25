@@ -7,7 +7,7 @@
 
 Admin panel for platform staff and tenant operators (restaurant owners, managers).
 
-- URL: `admin.yourapp.com` (production), `localhost:3000` (dev)
+- URL: `admin.deliverse.app` (production), `localhost:3000` (dev)
 - Audience: NOT end users / guests
 - Auth: Better-Auth instance #1, email/password + Google OAuth, NO OTP
 
@@ -54,6 +54,6 @@ src/
 
 ## Gotchas
 
-- Cookie scope: `Domain=admin.yourapp.com` only. NEVER wildcard.
+- Cookie scope: `Domain=admin.deliverse.app` only. NEVER wildcard.
 - Better-Auth route handler at `api/auth/[...all]` — don't move it.
 - `headers()` is async in Next.js 15. Always await.

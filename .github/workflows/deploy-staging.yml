@@ -110,7 +110,7 @@ jobs:
       # Uncomment when ready:
       # - name: Storefront health check
       #   run: |
-      #     STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pizza-express.staging.yourapp.com/)
+      #     STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://pizza-express.staging.deliverse.app/)
       #     if [ "$STATUS" -ne 200 ]; then
       #       echo "Storefront health check failed: HTTP $STATUS"
       #       exit 1

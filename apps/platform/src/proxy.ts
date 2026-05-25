@@ -2,13 +2,13 @@ import { type NextRequest, NextResponse } from 'next/server';
 import { getSessionCookie } from 'better-auth/cookies';
 
 /**
- * Auth middleware for the platform app.
+ * Auth proxy for the platform app (Next 15.5+; was middleware).
  * - Public routes: /login, /signup, /forgot-password, /reset-password, /verify-email
  * - All others: require valid session
  *
  * Note: we only check for session cookie presence, not validity.
  * Full validation happens in server components via auth.api.getSession().
- * This is by design (Better-Auth recommendation) — full validation in middleware
+ * This is by design (Better-Auth recommendation) — full validation in proxy
  * adds DB round-trip to every request.
  */
 
@@ -20,7 +20,7 @@ const PUBLIC_PATHS = [
   '/verify-email',
 ];
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Allow API routes

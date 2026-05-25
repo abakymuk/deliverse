@@ -1,5 +1,5 @@
 /**
- * Better-Auth configuration for the STOREFRONT app ({brand}.yourapp.com)
+ * Better-Auth configuration for the STOREFRONT app ({brand}.deliverse.app)
  *
  * Audience: restaurant guests (end users)
  * Methods: email OTP (primary) + email/password + Google OAuth (hybrid)

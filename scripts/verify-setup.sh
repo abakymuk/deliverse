@@ -13,7 +13,7 @@ ok() { echo -e "${GREEN}✓${NC} $1"; }
 fail() { echo -e "${RED}✗${NC} $1"; exit 1; }
 warn() { echo -e "${YELLOW}!${NC} $1"; }
 
-echo "Verifying restaurant-platform local setup..."
+echo "Verifying deliverse local setup..."
 echo ""
 
 # Node version

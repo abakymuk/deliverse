@@ -1,7 +1,7 @@
 # Project Tree
 
 ```
-restaurant-platform/
+deliverse/
 ├── AGENTS.md                       ← Constitution. Read first.
 ├── README.md                       ← Getting started
 ├── .env.example                    ← Env vars to copy
@@ -13,7 +13,7 @@ restaurant-platform/
 ├── tsconfig.json                   ← Base TS config
 │
 ├── apps/
-│   ├── platform/                   ← admin.yourapp.com
+│   ├── platform/                   ← admin.deliverse.app
 │   │   ├── AGENTS.md
 │   │   ├── package.json
 │   │   ├── next.config.ts
@@ -47,7 +47,7 @@ restaurant-platform/
 │   │   │   └── middleware.ts
 │   │   └── tests/e2e/auth.spec.ts
 │   │
-│   └── storefront/                 ← {brand}.yourapp.com
+│   └── storefront/                 ← {brand}.deliverse.app
 │       ├── AGENTS.md
 │       ├── package.json
 │       ├── next.config.ts

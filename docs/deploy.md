@@ -10,7 +10,7 @@
 
 - [ ] GitHub account with repo
 - [ ] Credit card (free tiers cover everything below for solo dev, but accounts may require card on file)
-- [ ] Domain you control (e.g., `yourapp.com`)
+- [ ] Domain you control (e.g., `deliverse.app`)
 - [ ] DNS provider with API access (Cloudflare recommended)
 
 ---
@@ -18,7 +18,7 @@
 ## Step 1: Neon (~10 min)
 
 1. Sign up at [neon.tech](https://neon.tech)
-2. Create project: `restaurant-platform`
+2. Create project: `deliverse`
 3. Region: choose closest to your customers (e.g., `aws-us-west-2` for OC)
 4. Postgres version: latest (16 at time of writing)
 5. After creation, the default branch is `main` — rename or ignore.
@@ -46,7 +46,7 @@ Save these — you'll paste into Doppler next.
 ## Step 2: Doppler (~15 min)
 
 1. Sign up at [doppler.com](https://doppler.com)
-2. Create project: `restaurant-platform`
+2. Create project: `deliverse`
 3. Doppler creates 3 default environments: `dev`, `stg`, `prd`. Keep these names — our scripts assume them.
 
 For each environment's config, add these secrets:
@@ -70,26 +70,26 @@ INNGEST_SIGNING_KEY                = (optional in dev)
 ```
 DATABASE_URL                       = <Neon staging URL>
 BETTER_AUTH_SECRET                 = <fresh openssl rand -base64 32>
-BETTER_AUTH_URL                    = https://admin.staging.yourapp.com
+BETTER_AUTH_URL                    = https://admin.staging.deliverse.app
 GOOGLE_CLIENT_ID                   = <same as dev, but add stg redirect URI in Google Console>
 GOOGLE_CLIENT_SECRET               = <same as dev>
 RESEND_API_KEY                     = <Resend test key>
-RESEND_FROM_EMAIL                  = noreply@staging.yourapp.com
-NEXT_PUBLIC_PLATFORM_URL           = https://admin.staging.yourapp.com
-NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN = staging.yourapp.com
+RESEND_FROM_EMAIL                  = noreply@staging.deliverse.app
+NEXT_PUBLIC_PLATFORM_URL           = https://admin.staging.deliverse.app
+NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN = staging.deliverse.app
 ```
 
 ### `prd` config
 ```
 DATABASE_URL                       = <Neon production URL>
 BETTER_AUTH_SECRET                 = <fresh openssl rand -base64 32>
-BETTER_AUTH_URL                    = https://admin.yourapp.com
+BETTER_AUTH_URL                    = https://admin.deliverse.app
 GOOGLE_CLIENT_ID                   = <new Google OAuth app for prd; verified domain>
 GOOGLE_CLIENT_SECRET               = <new>
 RESEND_API_KEY                     = <Resend prod key, requires verified domain>
-RESEND_FROM_EMAIL                  = noreply@yourapp.com
-NEXT_PUBLIC_PLATFORM_URL           = https://admin.yourapp.com
-NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN = yourapp.com
+RESEND_FROM_EMAIL                  = noreply@deliverse.app
+NEXT_PUBLIC_PLATFORM_URL           = https://admin.deliverse.app
+NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN = deliverse.app
 ```
 
 **Generate fresh secrets per environment.** Reusing the same `BETTER_AUTH_SECRET` across environments means stg compromise = prd compromise.
@@ -109,9 +109,9 @@ curl -Ls https://cli.doppler.com/install.sh | sh
 doppler login
 
 # Link this repo to Doppler project
-cd /path/to/restaurant-platform
+cd /path/to/deliverse
 doppler setup
-# When prompted: select project "restaurant-platform", config "dev"
+# When prompted: select project "deliverse", config "dev"
 ```
 
 Test:
@@ -151,17 +151,17 @@ After this, all three DBs have schema. Going forward, migrations run via CI.
 
 1. Sign up at [vercel.com](https://vercel.com) (free Pro trial often available)
 2. Connect GitHub account
-3. Import the `restaurant-platform` repo **twice** — once per app:
+3. Import the `deliverse` repo **twice** — once per app:
 
 ### Platform project
-- Name: `restaurant-platform-platform`
+- Name: `deliverse-platform`
 - Root Directory: `apps/platform`
 - Framework Preset: Next.js
 - Build Command: leave default
 - Output Directory: leave default
 
 ### Storefront project
-- Name: `restaurant-platform-storefront`
+- Name: `deliverse-storefront`
 - Root Directory: `apps/storefront`
 - Framework Preset: Next.js
 
@@ -192,22 +192,22 @@ Verify: open Vercel project → Settings → Environment Variables. You should s
 In each Vercel project → Settings → Domains, add:
 
 ### Platform project
-- `admin.yourapp.com` → Production
-- `admin.staging.yourapp.com` → Custom env: staging
+- `admin.deliverse.app` → Production
+- `admin.staging.deliverse.app` → Custom env: staging
 
 ### Storefront project
-- `*.yourapp.com` → Production (wildcard)
-- `*.staging.yourapp.com` → Custom env: staging (wildcard)
+- `*.deliverse.app` → Production (wildcard)
+- `*.staging.deliverse.app` → Custom env: staging (wildcard)
 
 Vercel will show DNS records you need to add. In Cloudflare (or your DNS):
 
 ```
-yourapp.com                     A     76.76.21.21
-admin.yourapp.com               CNAME cname.vercel-dns.com
-*.yourapp.com                   CNAME cname.vercel-dns.com
-staging.yourapp.com             CNAME cname.vercel-dns.com
-admin.staging.yourapp.com       CNAME cname.vercel-dns.com
-*.staging.yourapp.com           CNAME cname.vercel-dns.com
+deliverse.app                     A     76.76.21.21
+admin.deliverse.app               CNAME cname.vercel-dns.com
+*.deliverse.app                   CNAME cname.vercel-dns.com
+staging.deliverse.app             CNAME cname.vercel-dns.com
+admin.staging.deliverse.app       CNAME cname.vercel-dns.com
+*.staging.deliverse.app           CNAME cname.vercel-dns.com
 ```
 
 ⚠️ In Cloudflare, set these records to "DNS only" (gray cloud), NOT proxied. Vercel needs direct access for SSL provisioning.
@@ -221,7 +221,7 @@ Wait 5-15 min for DNS propagation and Let's Encrypt certificate issuance.
 Get the values:
 
 ### Doppler service tokens
-1. Doppler dashboard → `restaurant-platform` → `stg` config → Access → Service Tokens → Create
+1. Doppler dashboard → `deliverse` → `stg` config → Access → Service Tokens → Create
 2. Name: `github-actions-stg`. Access: Read.
 3. Copy the `dp.st.stg.xxxxx` token.
 4. Repeat for `prd` config → token `github-actions-prd`.
@@ -285,7 +285,7 @@ Watch GitHub Actions tab. The `Deploy Staging` workflow should run:
 2. Deploy platform to Vercel staging
 3. Deploy storefront to Vercel staging
 
-Visit `https://admin.staging.yourapp.com`. Should load login page.
+Visit `https://admin.staging.deliverse.app`. Should load login page.
 
 ### Production
 ```bash
@@ -295,7 +295,7 @@ Visit `https://admin.staging.yourapp.com`. Should load login page.
 # Approve via GitHub Environments
 ```
 
-Visit `https://admin.yourapp.com`. Should load login page.
+Visit `https://admin.deliverse.app`. Should load login page.
 
 ---
 
@@ -306,7 +306,7 @@ For each environment:
 - [ ] Platform: load login page
 - [ ] Platform: register a test account (or use seeded admin)
 - [ ] Platform: log in successfully, see dashboard
-- [ ] Storefront: visit `{seed-brand}.<env>.yourapp.com`
+- [ ] Storefront: visit `{seed-brand}.<env>.deliverse.app`
 - [ ] Storefront: brand name renders correctly
 - [ ] Storefront: request OTP → received in email
 - [ ] Storefront: log in with OTP → see account page
@@ -319,7 +319,7 @@ If any fail: check Vercel function logs and Sentry (when configured).
 
 ### "Doppler not finding project"
 ```bash
-doppler setup --no-interactive --project restaurant-platform --config dev
+doppler setup --no-interactive --project deliverse --config dev
 ```
 
 ### "Vercel deploy fails: missing DATABASE_URL"
@@ -331,7 +331,7 @@ Vercel build is cached. Trigger redeploy via Vercel CLI or push empty commit.
 ### "Wildcard subdomain returns 404"
 Vercel needs both:
 1. Wildcard CNAME in DNS
-2. Wildcard domain added to Vercel project (`*.yourapp.com`)
+2. Wildcard domain added to Vercel project (`*.deliverse.app`)
 Both must be present.
 
 ### "Storefront returns 500 with 'No brand specified'"

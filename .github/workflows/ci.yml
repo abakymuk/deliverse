@@ -40,6 +40,8 @@ jobs:
         env:
           DATABASE_URL: postgresql://fake:fake@fake:5432/fake
           BETTER_AUTH_SECRET: ci_secret_at_least_32_chars_long_xx
+          BETTER_AUTH_URL: http://localhost:3000
+          NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN: localhost:3001
 
   e2e:
     runs-on: ubuntu-latest

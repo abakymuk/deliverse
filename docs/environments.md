@@ -24,8 +24,8 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  STG — pre-production                                            │
 │                                                                  │
-│  Domain:    admin.staging.yourapp.com                           │
-│             {brand}.staging.yourapp.com                         │
+│  Domain:    admin.staging.deliverse.app                           │
+│             {brand}.staging.deliverse.app                         │
 │  DB:        Neon `staging` branch (long-lived, always on)       │
 │  Secrets:   Doppler config `stg`                                │
 │  Git:       `staging` branch                                    │
@@ -38,8 +38,8 @@
 ┌─────────────────────────────────────────────────────────────────┐
 │  PRD — production                                                │
 │                                                                  │
-│  Domain:    admin.yourapp.com                                   │
-│             {brand}.yourapp.com                                 │
+│  Domain:    admin.deliverse.app                                   │
+│             {brand}.deliverse.app                                 │
 │  DB:        Neon `production` branch                            │
 │  Secrets:   Doppler config `prd`                                │
 │  Git:       `main` branch                                       │
@@ -82,13 +82,13 @@ feature/*     ← dev work, branched off `staging`
 6. CI runs lint+typecheck+tests on PR
 7. Merge PR → staging branch
 8. GitHub Actions: migrate stg DB, deploy stg
-9. Test on https://admin.staging.yourapp.com
+9. Test on https://admin.staging.deliverse.app
 10. When ready: open PR staging → main
 11. Code review (self-review for solo, or Alexey when applicable)
 12. Merge → main triggers prd deployment workflow
 13. Approval gate (GitHub environment "production" requires manual approve)
 14. GitHub Actions: migrate prd DB, deploy prd
-15. Smoke test https://admin.yourapp.com
+15. Smoke test https://admin.deliverse.app
 ```
 
 ---
@@ -98,7 +98,7 @@ feature/*     ← dev work, branched off `staging`
 ### Project structure
 
 ```
-Doppler Project: restaurant-platform
+Doppler Project: deliverse
 ├── Environment: dev
 │   └── Config: dev (used by local + preview deploys)
 ├── Environment: stg
@@ -112,13 +112,13 @@ Doppler Project: restaurant-platform
 ```
 DATABASE_URL              ← Different Neon connection per env
 BETTER_AUTH_SECRET        ← Different per env (generate fresh)
-BETTER_AUTH_URL           ← admin.<env>.yourapp.com
+BETTER_AUTH_URL           ← admin.<env>.deliverse.app
 GOOGLE_CLIENT_ID          ← Same OAuth app, different redirect URIs registered
 GOOGLE_CLIENT_SECRET      ← Same
 RESEND_API_KEY            ← Resend supports test keys for dev/stg
-RESEND_FROM_EMAIL         ← noreply@<env>.yourapp.com
-NEXT_PUBLIC_PLATFORM_URL  ← admin.<env>.yourapp.com
-NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN  ← <env>.yourapp.com
+RESEND_FROM_EMAIL         ← noreply@<env>.deliverse.app
+NEXT_PUBLIC_PLATFORM_URL  ← admin.<env>.deliverse.app
+NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN  ← <env>.deliverse.app
 INNGEST_EVENT_KEY         ← Per env
 INNGEST_SIGNING_KEY       ← Per env
 SENTRY_DSN                ← Optional in dev
@@ -143,7 +143,7 @@ One-time:
 ```bash
 brew install dopplerhq/cli/doppler
 doppler login
-cd /path/to/restaurant-platform
+cd /path/to/deliverse
 doppler setup       # interactive: pick project + dev config
 ```
 
@@ -285,16 +285,16 @@ For features that need schema changes:
 
 Production:
 ```
-yourapp.com                A     76.76.21.21         (Vercel anycast)
-*.yourapp.com              CNAME cname.vercel-dns.com
-admin.yourapp.com          CNAME cname.vercel-dns.com
+deliverse.app                A     76.76.21.21         (Vercel anycast)
+*.deliverse.app              CNAME cname.vercel-dns.com
+admin.deliverse.app          CNAME cname.vercel-dns.com
 ```
 
 Staging (subdomain of prod):
 ```
-staging.yourapp.com        CNAME cname.vercel-dns.com
-*.staging.yourapp.com      CNAME cname.vercel-dns.com
-admin.staging.yourapp.com  CNAME cname.vercel-dns.com
+staging.deliverse.app        CNAME cname.vercel-dns.com
+*.staging.deliverse.app      CNAME cname.vercel-dns.com
+admin.staging.deliverse.app  CNAME cname.vercel-dns.com
 ```
 
 Configure these in your DNS provider (Cloudflare recommended). Vercel auto-validates ownership.
