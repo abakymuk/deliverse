@@ -2,195 +2,277 @@
 
 /**
  * Storefront login form — hybrid auth:
+ *   1. OTP (primary): email → 6-digit code → /verify-otp
+ *   2. Password fallback: email + password → /account
+ *   3. Google OAuth
  *
- * Flow:
- *   1. User enters email
- *   2. Default: send OTP (primary)
- *   3. Alternative link: "Sign in with password" → reveals password field
- *   4. Alternative: Google OAuth
- *
- * Based on shadcn/ui login block, customized for OTP-first.
+ * Mode switching uses keyed child forms (see docs/specs/ui-foundations.md
+ * §8.2) — each child has its own useForm + zodResolver, so RHF re-initializes
+ * cleanly on switch without resolver-swap edge cases.
  */
 
-import { useState } from 'react';
+import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { Route } from 'next';
-import { signIn, emailOtp } from '@/lib/auth-client';
+import { useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { z } from 'zod';
+
+import { Button } from '@rp/ui/components/button';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@rp/ui/components/card';
+import { Field, FieldError, FieldLabel } from '@rp/ui/components/field';
+import { Input } from '@rp/ui/components/input';
+
+import { emailOtp, signIn } from '@/lib/auth-client';
+
+const otpSchema = z.object({
+  email: z.string().email('Enter a valid email'),
+});
+type OtpValues = z.infer<typeof otpSchema>;
+
+const passwordSchema = z.object({
+  email: z.string().email('Enter a valid email'),
+  password: z.string().min(8, 'At least 8 characters'),
+});
+type PasswordValues = z.infer<typeof passwordSchema>;
 
 type Mode = 'otp' | 'password';
 
 export function LoginForm() {
-  const router = useRouter();
+  const [mode, setMode] = useState<Mode>('otp');
+  const [googleLoading, setGoogleLoading] = useState(false);
   const searchParams = useSearchParams();
   const next = searchParams.get('next') ?? '/account';
 
-  const [mode, setMode] = useState<Mode>('otp');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  async function handleOtpRequest(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      const result = await emailOtp.sendVerificationOtp({
-        email,
-        type: 'sign-in',
-      });
-
-      if (result.error) {
-        setError(result.error.message ?? 'Could not send code');
-        return;
-      }
-
-      // Redirect to verify-otp page with email in query
-      const params = new URLSearchParams({ email, next });
-      router.push(`/verify-otp?${params.toString()}` as Route);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handlePasswordLogin(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setLoading(true);
-
-    try {
-      const result = await signIn.email({
-        email,
-        password,
-        callbackURL: next,
-      });
-
-      if (result.error) {
-        setError(result.error.message ?? 'Login failed');
-        return;
-      }
-
-      router.push(next as Route);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function handleGoogleLogin() {
-    setLoading(true);
+    setGoogleLoading(true);
     await signIn.social({ provider: 'google', callbackURL: next });
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2 text-center">
-        <h2 className="text-lg font-semibold">Sign in</h2>
-        <p className="text-sm text-[var(--color-muted-foreground)]">
+    <Card className="w-full max-w-sm">
+      <CardHeader>
+        <CardTitle>Sign in</CardTitle>
+        <CardDescription>
           {mode === 'otp'
             ? "We'll email you a 6-digit code"
             : 'Use your email and password'}
-        </p>
-      </div>
-
-      <form
-        onSubmit={mode === 'otp' ? handleOtpRequest : handlePasswordLogin}
-        className="flex flex-col gap-4"
-      >
-        <div className="flex flex-col gap-2">
-          <label htmlFor="email" className="text-sm font-medium">
-            Email
-          </label>
-          <input
-            id="email"
-            type="email"
-            autoComplete="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded-md border px-3 py-2"
-          />
-        </div>
-
-        {mode === 'password' && (
-          <div className="flex flex-col gap-2">
-            <label htmlFor="password" className="text-sm font-medium">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="rounded-md border px-3 py-2"
-            />
-          </div>
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {mode === 'otp' ? (
+          <OtpForm key="otp" next={next} />
+        ) : (
+          <PasswordForm key="password" next={next} />
         )}
-
-        {error && (
-          <p className="text-sm text-[var(--color-destructive)]">{error}</p>
-        )}
-
-        <button
-          type="submit"
-          disabled={loading}
-          className="rounded-md bg-[var(--color-primary)] py-2 text-[var(--color-primary-foreground)] disabled:opacity-50"
-        >
-          {loading
-            ? 'Loading...'
-            : mode === 'otp'
-              ? 'Send code'
-              : 'Sign in'}
-        </button>
 
         <button
           type="button"
-          onClick={() => {
-            setMode(mode === 'otp' ? 'password' : 'otp');
-            setError(null);
-          }}
-          className="text-sm text-[var(--color-muted-foreground)] hover:underline"
+          onClick={() => setMode(mode === 'otp' ? 'password' : 'otp')}
+          className="text-muted-foreground mt-4 w-full text-sm hover:underline"
         >
           {mode === 'otp'
             ? 'Sign in with password instead'
             : 'Sign in with a code instead'}
         </button>
-      </form>
 
-      <div className="relative">
-        <div className="absolute inset-0 flex items-center">
-          <span className="w-full border-t" />
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <span className="w-full border-t" />
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-card text-muted-foreground px-2">Or</span>
+          </div>
         </div>
-        <div className="relative flex justify-center text-xs uppercase">
-          <span className="bg-[var(--color-background)] px-2 text-[var(--color-muted-foreground)]">
-            Or
-          </span>
-        </div>
-      </div>
 
-      <button
-        type="button"
-        onClick={handleGoogleLogin}
-        disabled={loading}
-        className="rounded-md border py-2 disabled:opacity-50"
-      >
-        Continue with Google
-      </button>
+        <Button
+          type="button"
+          variant="outline"
+          className="w-full"
+          onClick={handleGoogleLogin}
+          disabled={googleLoading}
+        >
+          Continue with Google
+        </Button>
 
-      <p className="text-center text-sm text-[var(--color-muted-foreground)]">
-        Don't have an account?{' '}
-        <Link href={'/signup' as Route} className="underline">
-          Sign up
-        </Link>
-      </p>
-    </div>
+        <p className="text-muted-foreground mt-6 text-center text-sm">
+          Don&apos;t have an account?{' '}
+          <Link href={'/signup' as Route} className="underline">
+            Sign up
+          </Link>
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function OtpForm({ next }: { next: string }) {
+  const router = useRouter();
+
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    setError,
+  } = useForm<OtpValues>({
+    resolver: zodResolver(otpSchema),
+    defaultValues: { email: '' },
+  });
+
+  async function onSubmit(values: OtpValues) {
+    try {
+      const result = await emailOtp.sendVerificationOtp({
+        email: values.email,
+        type: 'sign-in',
+      });
+
+      if (result.error) {
+        setError('root', {
+          message: result.error.message ?? 'Could not send code',
+        });
+        return;
+      }
+
+      const params = new URLSearchParams({ email: values.email, next });
+      router.push(`/verify-otp?${params.toString()}` as Route);
+    } catch (err) {
+      setError('root', {
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      className="flex flex-col gap-4"
+      noValidate
+    >
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: rhfField, fieldState }) => (
+          <Field>
+            <FieldLabel htmlFor="otp-email">Email</FieldLabel>
+            <Input
+              id="otp-email"
+              type="email"
+              autoComplete="email"
+              aria-invalid={fieldState.invalid}
+              {...rhfField}
+            />
+            {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+          </Field>
+        )}
+      />
+
+      {errors.root && (
+        <p className="text-destructive text-sm" role="alert">
+          {errors.root.message}
+        </p>
+      )}
+
+      <Button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Sending…' : 'Send code'}
+      </Button>
+    </form>
+  );
+}
+
+function PasswordForm({ next }: { next: string }) {
+  const router = useRouter();
+
+  const {
+    control,
+    handleSubmit,
+    formState: { errors, isSubmitting },
+    setError,
+  } = useForm<PasswordValues>({
+    resolver: zodResolver(passwordSchema),
+    defaultValues: { email: '', password: '' },
+  });
+
+  async function onSubmit(values: PasswordValues) {
+    try {
+      const result = await signIn.email({
+        email: values.email,
+        password: values.password,
+        callbackURL: next,
+      });
+
+      if (result.error) {
+        setError('root', {
+          message: result.error.message ?? 'Login failed',
+        });
+        return;
+      }
+
+      router.push(next as Route);
+    } catch (err) {
+      setError('root', {
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit(onSubmit)}
+      className="flex flex-col gap-4"
+      noValidate
+    >
+      <Controller
+        control={control}
+        name="email"
+        render={({ field: rhfField, fieldState }) => (
+          <Field>
+            <FieldLabel htmlFor="pw-email">Email</FieldLabel>
+            <Input
+              id="pw-email"
+              type="email"
+              autoComplete="email"
+              aria-invalid={fieldState.invalid}
+              {...rhfField}
+            />
+            {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+          </Field>
+        )}
+      />
+
+      <Controller
+        control={control}
+        name="password"
+        render={({ field: rhfField, fieldState }) => (
+          <Field>
+            <FieldLabel htmlFor="pw-password">Password</FieldLabel>
+            <Input
+              id="pw-password"
+              type="password"
+              autoComplete="current-password"
+              aria-invalid={fieldState.invalid}
+              {...rhfField}
+            />
+            {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+          </Field>
+        )}
+      />
+
+      {errors.root && (
+        <p className="text-destructive text-sm" role="alert">
+          {errors.root.message}
+        </p>
+      )}
+
+      <Button type="submit" disabled={isSubmitting}>
+        {isSubmitting ? 'Signing in…' : 'Sign in'}
+      </Button>
+    </form>
   );
 }
