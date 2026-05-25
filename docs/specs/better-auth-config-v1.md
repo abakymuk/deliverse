@@ -424,8 +424,8 @@ DEL-3 will need to supply these fields from a request-scoped tenant resolver. Th
 
 - [ ] `pnpm typecheck` clean across the workspace (no env required).
 - [ ] `doppler run -- pnpm dev` boots both apps with zero BA startup validation errors. *(Best-effort — needs Doppler `dev` config.)*
-- [ ] `curl http://localhost:3000/api/auth/get-session` → `{}` (empty session). *(Best-effort.)*
-- [ ] `curl -H 'Host: pizza-express.localhost:3001' http://localhost:3001/api/auth/get-session` → `{}`. Auth route boots and resolves an empty session for a tenant-style host. This does **not** by itself exercise `trustedOrigins` — `get-session` is a GET with no `Origin` header, so the origin middleware is not triggered. *(Best-effort.)*
+- [ ] `curl http://localhost:3000/api/auth/get-session` → HTTP 200 with body `null` (BA 1.6.11's "no active session" response — not `{}`). *(Best-effort.)*
+- [ ] `curl -H 'Host: pizza-express.localhost:3001' http://localhost:3001/api/auth/get-session` → HTTP 200 with body `null`. Auth route boots and resolves an empty session for a tenant-style host. This does **not** by itself exercise `trustedOrigins` — `get-session` is a GET with no `Origin` header, so the origin middleware is not triggered. *(Best-effort.)*
 - [ ] **Origin boundary check — unit-style, not curl.** A short `tsx` scratch script (e.g. `packages/auth-core/scratch/origin-check.ts`) imports `isAllowedStorefrontOrigin` and asserts:
   - `isAllowedStorefrontOrigin('pizza-express.deliverse.app', 'deliverse.app') === true`
   - `isAllowedStorefrontOrigin('deliverse.app', 'deliverse.app') === true`
