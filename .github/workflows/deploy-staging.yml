@@ -59,8 +59,18 @@ jobs:
       - name: Pull Vercel env (staging)
         run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Debug pulled env
+        run: |
+          ls -la .vercel/
+          echo "Variables present:"
+          cut -d= -f1 .vercel/.env.preview.local | sort
+
       - name: Build
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -a
+          source .vercel/.env.preview.local
+          set +a
+          vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy
         run: |
@@ -91,8 +101,18 @@ jobs:
       - name: Pull Vercel env (staging)
         run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
 
+      - name: Debug pulled env
+        run: |
+          ls -la .vercel/
+          echo "Variables present:"
+          cut -d= -f1 .vercel/.env.preview.local | sort
+
       - name: Build
-        run: vercel build --token=${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -a
+          source .vercel/.env.preview.local
+          set +a
+          vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy
         run: |
