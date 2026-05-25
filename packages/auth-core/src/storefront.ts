@@ -142,9 +142,9 @@ export const storefrontAuth = betterAuth({
     if (!request) return [];
     const host = request.headers.get('host');
     const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
-    if (!isAllowedStorefrontOrigin(host, baseDomain)) return [];
+    if (!host || !isAllowedStorefrontOrigin(host, baseDomain)) return [];
     const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-    return [`${proto}://${host!.toLowerCase()}`];
+    return [`${proto}://${host.toLowerCase()}`];
   },
 
   databaseHooks: {

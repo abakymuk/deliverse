@@ -26,5 +26,5 @@ export function isAllowedStorefrontOrigin(
   const h = normalize(host);
   const b = normalize(baseDomain);
   if (!h || !b) return false;
-  return h === b || h.endsWith('.' + b);
+  return h === b || h.endsWith(`.${b}`);
 }
