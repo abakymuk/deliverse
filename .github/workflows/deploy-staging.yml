@@ -59,7 +59,7 @@ jobs:
       - name: Deploy
         run: |
           DEPLOYMENT_URL=$(vercel deploy --token=${{ secrets.VERCEL_TOKEN }} --yes)
-          vercel alias set $DEPLOYMENT_URL admin.staging.yourapp.com --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
+          vercel alias set $DEPLOYMENT_URL admin.staging.deliverse.app --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
 
   deploy-storefront:
     name: Deploy storefront to staging
@@ -86,7 +86,7 @@ jobs:
         run: |
           DEPLOYMENT_URL=$(vercel deploy --token=${{ secrets.VERCEL_TOKEN }} --yes)
           # Storefront alias is wildcard — Vercel handles routing per-subdomain at the edge
-          vercel alias set $DEPLOYMENT_URL staging.yourapp.com --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
+          vercel alias set $DEPLOYMENT_URL staging.deliverse.app --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
 
   smoke-test:
     name: Smoke test staging
@@ -99,7 +99,7 @@ jobs:
 
       - name: Platform health check
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://admin.staging.yourapp.com/login)
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://admin.staging.deliverse.app/login)
           if [ "$STATUS" -ne 200 ]; then
             echo "Platform health check failed: HTTP $STATUS"
             exit 1
