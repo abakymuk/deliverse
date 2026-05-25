@@ -97,12 +97,14 @@ export const platformUsers = pgTable('platform_users', {
   // Email: identifier + recovery. Globally unique among non-deleted.
   email: text('email').notNull(),
 
-  // Display name. Optional because Google OAuth signup may not always send it.
-  name: text('name'),
+  // Display name. Required by Better-Auth core (user.name).
+  // Signup paths supply a fallback (e.g. email local-part) when OAuth omits it.
+  name: text('name').notNull(),
 
-  // Email verification. Null = not verified.
-  // Timestamp (not boolean) for audit: when did they verify?
-  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  // Better-Auth core shape: boolean, default false, input:false.
+  // Audit "when did they verify?" is a v2 concern — add a separate
+  // email_verified_at column + databaseHooks.user.update.after if needed.
+  emailVerified: boolean('email_verified').notNull().default(false),
 
   // Profile image URL (from OAuth provider or user upload).
   imageUrl: text('image_url'),
@@ -218,6 +220,12 @@ export const platformSessions = pgTable('platform_sessions', {
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
 
+  // Better-Auth organization plugin augments session with activeOrganizationId.
+  // Nullable: a session exists before any tenant is selected.
+  // ON DELETE SET NULL: tenant hard-delete leaves the session valid but unscoped.
+  activeOrganizationId: uuid('active_organization_id')
+    .references(() => tenants.id, { onDelete: 'set null' }),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
@@ -229,6 +237,9 @@ export const platformSessions = pgTable('platform_sessions', {
 
   // For periodic cleanup of expired sessions (cron job)
   expiresIdx: index('platform_sessions_expires_idx').on(t.expiresAt),
+
+  // "List sessions in this org" — admin UI, audit, tenant-member-removed cleanup.
+  activeOrgIdx: index('platform_sessions_active_org_idx').on(t.activeOrganizationId),
 }));
 
 /**
@@ -500,8 +511,11 @@ export const tenantEndUsers = pgTable('tenant_end_users', {
     .references(() => tenants.id, { onDelete: 'cascade' }),
 
   email: text('email').notNull(),
-  name: text('name'),
-  emailVerifiedAt: timestamp('email_verified_at', { withTimezone: true }),
+  // Required by Better-Auth core; signup paths supply a fallback.
+  name: text('name').notNull(),
+  // Better-Auth core shape: boolean, default false, input:false.
+  // v2 audit-timestamp path lives in a separate column + databaseHooks.
+  emailVerified: boolean('email_verified').notNull().default(false),
   imageUrl: text('image_url'),
 
   // Phone optional in v1 (no SMS OTP, but might want for delivery contact)
