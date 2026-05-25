@@ -109,6 +109,13 @@ export const platformAuth = betterAuth({
   },
 
   advanced: {
+    // BA generates IDs for sessions/accounts/verifications. Our schema columns
+    // are `uuid` type (DEL-10), so BA's default base64-ish IDs would fail with
+    // PostgresError: invalid input syntax for type uuid. The 'uuid' magic
+    // string tells BA to emit RFC-4122 UUIDs via crypto.randomUUID().
+    database: {
+      generateId: 'uuid',
+    },
     cookiePrefix: 'rp_platform',
     crossSubDomainCookies: {
       enabled: false,
