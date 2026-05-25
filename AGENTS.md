@@ -133,17 +133,24 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 ## Current Focus
 
-> **Update this section weekly.** Stale focus = lying to AI.
+> **Linear is the source of truth for what we're working on.** This section mirrors the active project + milestone in Linear at a glance; the canonical state is in Linear. See `docs/linear-workflow.md` for the rules.
 
-- ✅ Auth architecture spec v3 (docs/auth-spec.md)
-- ✅ Drizzle schema (packages/db/src/schema.ts)
-- 🚧 Better-Auth config for both apps
-- 🚧 Tenant resolution proxy (storefront)
-- ⏭ Login/signup pages with shadcn blocks
-- ⏭ Email OTP delivery via Resend
-- ⏭ Tenant onboarding flow (invite-only signup)
-- ⏭ Brand creation & subdomain wiring
-- ⏭ Playwright E2E for auth flows
+Active project: **Phase 0 — Foundation** (Linear, Urgent, target 2026-06-08).
+Active milestone: **M0 — Local-dev unblock**.
+Current `Todo`: **DEL-10** — Drizzle schema v1: Better Auth-compatible identity schema.
+
+Phase 0 (M0) backlog after DEL-10:
+- DEL-11 — Better Auth config v1: field mappings, plugins, OTP storage (Urgent, blocked by DEL-10)
+- DEL-1 — Seed script (Urgent, blocked by DEL-11)
+- DEL-2 — Install shadcn primitives + rewrite login forms (High, relatedTo DEL-1)
+
+Phase 1 — Auth Vertical (M1 — Auth end-to-end):
+- DEL-3 — Storefront `tenant_id` injection (Urgent)
+- DEL-4 — Email delivery architecture (Urgent)
+- DEL-5 / DEL-6 — OTP + transactional emails via Inngest → Resend
+- DEL-7 — Signup pages + cross-brand disclosure
+- DEL-8 — Re-enable E2E in CI
+- DEL-9 — OTP rate limiting
 
 **Definition of Done (per feature):**
 1. Spec in `docs/specs/<feature>.md` (one page max)
@@ -188,14 +195,16 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 ## Workflow (Plan → Build → Sync)
 
+> See `docs/development-workflow.md` for the full cycle and `docs/linear-workflow.md` for how it maps onto Linear states.
+
 ### Phase 1: Plan
 Before any code, the session produces:
-1. Spec in `docs/specs/<feature>.md` (one page)
+1. Spec in `docs/specs/<feature>.md` (one page) — this is AC#1 of the Linear issue
 2. Acceptance criteria (3-7 testable)
 3. Non-goals (what we're NOT doing)
 4. Files that will change
 
-User reviews. Iterates. Approves.
+User reviews. Iterates. Approves. Linear issue moves `Todo → In Progress` only after approval.
 
 ### Phase 2: Build
 Vertical slice — end-to-end thinnest possible path through:
@@ -219,10 +228,12 @@ One feature folder per slice. Co-located. Mergeable.
 
 ```
 1. Read /AGENTS.md (this file)
-2. Read /docs/specs/<feature>.md (if working on a feature)
-3. Read /apps/<app>/AGENTS.md (if working in a specific app)
-4. Read 2-3 reference files matching the area being changed
-5. Propose a plan. WAIT for user to approve. Do not start coding.
+2. Read /docs/linear-workflow.md (if touching Linear)
+3. Read the current Linear `Todo` issue + its linked spec
+4. Read /docs/specs/<feature>.md (if working on a feature)
+5. Read /apps/<app>/AGENTS.md (if working in a specific app)
+6. Read 2-3 reference files matching the area being changed
+7. Propose a plan. WAIT for user to approve. Do not start coding.
 ```
 
 The 30 seconds spent on this ritual saves hours of hallucinated APIs and wrong paths.
