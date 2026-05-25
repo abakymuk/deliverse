@@ -8,6 +8,13 @@
       "when": 1779630159261,
       "tag": "0000_strange_stephen_strange",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779727671109,
+      "tag": "0001_lonely_shinko_yamashiro",
+      "breakpoints": true
     }
   ]
 }
