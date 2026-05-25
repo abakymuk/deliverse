@@ -347,3 +347,5 @@ DNS resolves but middleware rejects. Check `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` 
 - Custom email domain verification → after first 50 customers
 
 Keep it minimal until the next thing actually hurts.
+
+<!-- deploy test: 2026-05-24 -->
