@@ -55,6 +55,18 @@ For storefront subdomains in dev, add to `/etc/hosts`:
 
 Or use Chrome / Firefox, which auto-resolve `*.localhost`.
 
+### Seeded data
+
+`doppler run -- pnpm db:seed` (step 4 in the Quick Start) populates a deterministic bootstrap dataset every Phase 0 / Phase 1 workstream depends on:
+
+- **Admin:** `admin@test.local` / `Admin-Dev-Pass-1` (override via `SEED_ADMIN_PASSWORD`)
+- **Tenant:** `hospitality-group` — admin is `owner`
+- **Brands:** `pizza-express`, `burger-heaven`
+- **Locations:** Downtown Kitchen, Eastside Kitchen
+- **Dark-kitchen link:** Downtown serves both brands via `location_brands`
+
+The script is idempotent (safe to re-run). See [`docs/specs/seed-data.md`](docs/specs/seed-data.md) for the full dataset spec.
+
 ---
 
 ## Structure
