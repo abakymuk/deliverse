@@ -56,19 +56,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Pull Vercel env (staging)
-        run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Build
-        run: |
-          # vercel build in CI ignores .env.preview.local; copy to .env.local
-          # which it does read for non-prod builds.
-          cp .vercel/.env.preview.local .vercel/.env.local
-          vercel build --token=${{ secrets.VERCEL_TOKEN }}
-
       - name: Deploy
         run: |
-          DEPLOYMENT_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          DEPLOYMENT_URL=$(vercel deploy --token=${{ secrets.VERCEL_TOKEN }} --yes)
           vercel alias set $DEPLOYMENT_URL admin.staging.yourapp.com --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
 
   deploy-storefront:
@@ -92,19 +82,9 @@ jobs:
       - name: Install Vercel CLI
         run: npm install -g vercel@latest
 
-      - name: Pull Vercel env (staging)
-        run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
-
-      - name: Build
-        run: |
-          # vercel build in CI ignores .env.preview.local; copy to .env.local
-          # which it does read for non-prod builds.
-          cp .vercel/.env.preview.local .vercel/.env.local
-          vercel build --token=${{ secrets.VERCEL_TOKEN }}
-
       - name: Deploy
         run: |
-          DEPLOYMENT_URL=$(vercel deploy --prebuilt --token=${{ secrets.VERCEL_TOKEN }})
+          DEPLOYMENT_URL=$(vercel deploy --token=${{ secrets.VERCEL_TOKEN }} --yes)
           # Storefront alias is wildcard — Vercel handles routing per-subdomain at the edge
           vercel alias set $DEPLOYMENT_URL staging.yourapp.com --token=${{ secrets.VERCEL_TOKEN }} --scope=$VERCEL_ORG_ID
 
