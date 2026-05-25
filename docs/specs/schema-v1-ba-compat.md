@@ -243,24 +243,26 @@ It's the column the plugin reads to resolve "current org" on every request. With
 
 ## 10. Migration plan
 
-Greenfield, no prod data, no preserved 0000:
+> **Migrations are append-only past dev.** The original DEL-10 plan was to delete `0000_strange_stephen_strange.sql` and regenerate as a single canonical 0000 — the issue body's "greenfield" framing. That regen broke staging on first merge: the staging Neon branch already had the old 0000 applied, the renamed/rewritten file had a different hash, drizzle-kit's migrator tried to re-run `CREATE TYPE "tenant_role" ...` and hit `PostgresError: type "tenant_role" already exists`. **General rule, now permanent (see §10.1):** canonical migration rewrites are only safe before *any* persistent environment has applied them. Once dev OR stg OR prd has a row in `__drizzle_migrations`, migrations are append-only.
 
-1. Delete `packages/db/migrations/0000_strange_stephen_strange.sql`.
-2. Delete `packages/db/migrations/meta/0000_snapshot.json`.
-3. **Reset** `packages/db/migrations/meta/_journal.json` to an empty entries list — do **not** delete it. `drizzle-kit generate` opens this file unconditionally and fails with `ENOENT` if it's missing. Write:
-   ```json
-   {
-     "version": "7",
-     "dialect": "postgresql",
-     "entries": []
-   }
-   ```
-4. Apply schema edits per §5.
-5. `pnpm --filter @rp/db generate` → single canonical 0000 (drizzle-kit picks a random suffix; expect a file like `0000_<adjective>_<noun>.sql`). The journal will be repopulated with one entry pointing at the new file.
-6. `pnpm typecheck`.
-7. `doppler run -- pnpm --filter @rp/db migrate` against an empty Neon dev branch (best-effort; needs Doppler).
+### Steps (the actual, working sequence)
 
-If Doppler isn't available in the session, steps 1–6 are sufficient for issue closure; step 7 is verified by Vlad locally.
+1. Keep `packages/db/migrations/0000_strange_stephen_strange.sql`, `meta/0000_snapshot.json`, and the original entry in `meta/_journal.json` byte-for-byte untouched.
+2. Apply schema edits per §5 to `packages/db/src/schema.ts`.
+3. `pnpm --filter @rp/db generate` — drizzle-kit diffs the current `schema.ts` against the existing 0000 snapshot and writes `0001_<random>.sql` containing only the deltas. Expect interactive prompts asking whether each removed-then-added column is a rename or a fresh column; for `email_verified_at → email_verified` answer **create** (the types differ — boolean vs timestamp — and rename would keep the wrong type). Drive non-interactively via `expect` if needed (see appendix).
+4. Inspect `0001_*.sql` — it should contain exactly: `ALTER COLUMN name SET NOT NULL` (×2), `ADD COLUMN email_verified BOOLEAN NOT NULL DEFAULT FALSE` (×2), `DROP COLUMN email_verified_at` (×2), `ADD COLUMN active_organization_id uuid + FK + index`. No `CREATE TYPE`, no `CREATE TABLE`.
+5. `pnpm typecheck`.
+6. Re-run `pnpm --filter @rp/db generate` — must report `No schema changes` (idempotent).
+7. `doppler run -- pnpm --filter @rp/db migrate` against staging — applies only `0001` (drizzle-kit's migrator skips already-applied entries via `__drizzle_migrations.hash`).
+
+### Data-safety notes for the 0001 deltas
+
+- `ALTER COLUMN name SET NOT NULL` will fail if any existing row has `name IS NULL`. Phase 0 has no business data, so this is safe today. For future similar migrations on prod with data, backfill names before the migration.
+- `DROP COLUMN email_verified_at` discards any column data. Again Phase 0 = no data; v2 audit-timestamp work will introduce a new column, not resurrect this one.
+
+### 10.1 Permanent rule (carry into AGENTS.md eventually)
+
+**Migrations are append-only past dev.** Canonical migration rewrites are permitted only *before* the first persistent environment has applied a migration. Once any of dev / stg / prd / a teammate's local Neon branch has a row in `__drizzle_migrations`, all schema changes ship as additive migrations on top of the existing chain. The "regenerate 0000" approach is reserved for the pre-merge bootstrap window only.
 
 ## 11. Out of scope
 
@@ -274,9 +276,9 @@ If Doppler isn't available in the session, steps 1–6 are sufficient for issue 
 
 ## 12. Verification checklist
 
-- [ ] `pnpm typecheck` clean.
-- [ ] `pnpm --filter @rp/db generate` produces no further diff (idempotent).
-- [ ] Single `0000_*.sql` present; old name gone.
-- [ ] `pnpm --filter @rp/db migrate` runs cleanly against an empty Neon dev branch *(best-effort, needs Doppler)*.
+- [x] `pnpm typecheck` clean.
+- [x] `pnpm --filter @rp/db generate` produces no further diff (idempotent).
+- [x] Original `0000_strange_stephen_strange.sql` and snapshot preserved; new `0001_lonely_shinko_yamashiro.sql` contains only the six deltas.
+- [ ] `pnpm --filter @rp/db migrate` against the staging Neon branch applies only `0001` (CI re-run after this PR's hotfix lands).
 - [ ] `psql -c '\d+ platform_sessions'` shows `active_organization_id uuid` with FK *(best-effort)*.
 - [ ] Drizzle Studio shows all tables, relations resolve *(best-effort)*.

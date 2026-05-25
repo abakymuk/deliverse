@@ -1,6 +1,6 @@
 {
-  "id": "00f14d13-26f2-4156-9c49-1355175f20b7",
-  "prevId": "00000000-0000-0000-0000-000000000000",
+  "id": "f420a8ed-481a-4b6c-b6d4-8848a7d995c3",
+  "prevId": "00f14d13-26f2-4156-9c49-1355175f20b7",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -528,6 +528,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "active_organization_id": {
+          "name": "active_organization_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -588,6 +594,21 @@
           "concurrently": false,
           "method": "btree",
           "with": {}
+        },
+        "platform_sessions_active_org_idx": {
+          "name": "platform_sessions_active_org_idx",
+          "columns": [
+            {
+              "expression": "active_organization_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
         }
       },
       "foreignKeys": {
@@ -602,6 +623,19 @@
             "id"
           ],
           "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "platform_sessions_active_organization_id_tenants_id_fk": {
+          "name": "platform_sessions_active_organization_id_tenants_id_fk",
+          "tableFrom": "platform_sessions",
+          "tableTo": "tenants",
+          "columnsFrom": [
+            "active_organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
           "onUpdate": "no action"
         }
       },
@@ -632,13 +666,14 @@
           "name": "name",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "email_verified_at": {
-          "name": "email_verified_at",
-          "type": "timestamp with time zone",
+        "email_verified": {
+          "name": "email_verified",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": false
         },
         "image_url": {
           "name": "image_url",
@@ -1247,13 +1282,14 @@
           "name": "name",
           "type": "text",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "email_verified_at": {
-          "name": "email_verified_at",
-          "type": "timestamp with time zone",
+        "email_verified": {
+          "name": "email_verified",
+          "type": "boolean",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true,
+          "default": false
         },
         "image_url": {
           "name": "image_url",
