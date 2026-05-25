@@ -21,6 +21,7 @@
     "postgres": "^3.4.9"
   },
   "devDependencies": {
+    "@better-auth/utils": "0.4.0",
     "@rp/typescript-config": "workspace:*",
     "@types/node": "^22.10.0",
     "drizzle-kit": "^0.30.6",
