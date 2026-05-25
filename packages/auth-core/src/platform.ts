@@ -4,26 +4,37 @@
  * Audience: platform staff + tenant operators
  * Methods: email/password + Google OAuth
  *
- * Maps our custom table names to Better-Auth's expected models:
- *   platform_users         → "user"
- *   platform_accounts      → "account"
- *   platform_sessions      → "session"
- *   platform_verifications → "verification"
- *
- * Organization plugin maps to:
- *   tenants               → "organization"
- *   tenant_memberships    → "member"
- *   tenant_invitations    → "invitation"
+ * Mappings per docs/specs/better-auth-config-v1.md §7. All `fields:` values
+ * are Drizzle property keys (camelCase), NOT SQL column names — see ADR 0007.
  */
 
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { organization } from 'better-auth/plugins';
+import { createAccessControl } from 'better-auth/plugins/access';
+import { defaultStatements } from 'better-auth/plugins/organization/access';
 import { db } from '@rp/db';
 import * as schema from '@rp/db/schema';
 
+const ac = createAccessControl(defaultStatements);
+
+const owner = ac.newRole({
+  organization: ['update', 'delete'],
+  member: ['create', 'update', 'delete'],
+  invitation: ['create', 'cancel'],
+});
+
+const manager = ac.newRole({
+  organization: ['update'],
+  member: ['create', 'update', 'delete'],
+  invitation: ['create', 'cancel'],
+});
+
+const staff = ac.newRole({});
+
+const viewer = ac.newRole({});
+
 export const platformAuth = betterAuth({
-  // === Database adapter ===
   database: drizzleAdapter(db, {
     provider: 'pg',
     schema: {
@@ -37,50 +48,59 @@ export const platformAuth = betterAuth({
     },
   }),
 
-  // === Secret (from env) ===
   secret: process.env.BETTER_AUTH_SECRET,
   baseURL: process.env.BETTER_AUTH_URL,
 
-  // === Custom field mappings ===
-  // BA expects field "emailVerified" (boolean) but we use "emailVerifiedAt" (timestamp).
-  // BA expects "image" but we use "imageUrl".
   user: {
     fields: {
-      emailVerified: 'email_verified_at',
-      image: 'image_url',
+      emailVerified: 'emailVerified',
+      image: 'imageUrl',
     },
     additionalFields: {
       deletedAt: {
         type: 'date',
         required: false,
-        input: false, // Don't allow user to set this
+        input: false,
       },
     },
   },
 
-  // === Email + Password ===
+  account: {
+    fields: {
+      userId: 'platformUserId',
+    },
+  },
+
+  session: {
+    fields: {
+      userId: 'platformUserId',
+    },
+    expiresIn: 60 * 60 * 24 * 30,
+    updateAge: 60 * 60 * 24 * 7,
+    cookieCache: {
+      enabled: true,
+      maxAge: 60 * 5,
+    },
+  },
+
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 12,
     maxPasswordLength: 128,
-    autoSignIn: false, // Require email verification first
+    autoSignIn: false,
     sendResetPassword: async ({ user, url }) => {
-      // TODO: integrate Resend
       console.log(`[DEV] Password reset for ${user.email}: ${url}`);
     },
   },
 
-  // === Email verification ===
   emailVerification: {
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
-      // TODO: integrate Resend
       console.log(`[DEV] Verify email for ${user.email}: ${url}`);
     },
   },
 
-  // === Google OAuth ===
   socialProviders: {
     google: {
       clientId: process.env.GOOGLE_CLIENT_ID || '',
@@ -88,22 +108,10 @@ export const platformAuth = betterAuth({
     },
   },
 
-  // === Session config ===
-  session: {
-    expiresIn: 60 * 60 * 24 * 30, // 30 days absolute
-    updateAge: 60 * 60 * 24 * 7,  // refresh every 7 days
-    cookieCache: {
-      enabled: true,
-      maxAge: 60 * 5, // 5 minutes
-    },
-  },
-
-  // === Cookie config ===
-  // CRITICAL: scoped to admin.deliverse.app only, NOT wildcard.
   advanced: {
     cookiePrefix: 'rp_platform',
     crossSubDomainCookies: {
-      enabled: false, // Explicit: do NOT share with storefronts
+      enabled: false,
     },
     defaultCookieAttributes: {
       sameSite: 'lax',
@@ -112,16 +120,27 @@ export const platformAuth = betterAuth({
     },
   },
 
-  // === Plugins ===
   plugins: [
     organization({
-      // Multi-tenancy: users belong to organizations (tenants) with roles
-      allowUserToCreateOrganization: false, // Only invited users
-      organizationLimit: 10, // Max tenants per user (e.g., chain franchise manager)
-      membershipLimit: 100, // Max members per tenant in v1
+      ac,
+      roles: { owner, manager, staff, viewer },
       creatorRole: 'owner',
-      // TODO: define custom roles (manager/staff/viewer) via createAccessControl.
-      // Using BA defaults for now: owner, admin, member.
+      allowUserToCreateOrganization: false,
+      organizationLimit: 10,
+      membershipLimit: 100,
+      schema: {
+        member: {
+          fields: {
+            organizationId: 'tenantId',
+            userId: 'platformUserId',
+          },
+        },
+        invitation: {
+          fields: {
+            organizationId: 'tenantId',
+          },
+        },
+      },
     }),
   ],
 });
