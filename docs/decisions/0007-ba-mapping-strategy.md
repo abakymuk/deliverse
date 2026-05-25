@@ -65,7 +65,9 @@ Map BA → schema. Our column and table names stay; BA is configured to point at
 
 ## Migration impact
 
-Greenfield. No data exists yet. The single existing `0000_strange_stephen_strange.sql` migration is deleted and regenerated to capture the v1 schema as one canonical file. No production data to ALTER, no rollback plan beyond `git revert` + regenerate.
+v1 ships as the original `0000_strange_stephen_strange.sql` (preserved untouched) plus an additive `0001_*.sql` containing the six schema deltas from this issue.
+
+The original DEL-10 plan called for deleting `0000_*` and regenerating it as a single canonical migration ("greenfield"). That assumption held for dev but **not** for staging — the staging Neon branch already had the old 0000 applied, and the rewritten 0000 had a different file hash, so drizzle-kit's migrator tried to re-run `CREATE TYPE "tenant_role" ...` against a DB where the type already existed. Hotfix replaced the rewrite with an additive 0001. See spec §10 for the corrected sequence and §10.1 for the now-permanent **append-only past dev** rule.
 
 ## Future implications
 
