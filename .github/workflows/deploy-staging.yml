@@ -59,17 +59,11 @@ jobs:
       - name: Pull Vercel env (staging)
         run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Debug pulled env
-        run: |
-          ls -la .vercel/
-          echo "Variables present:"
-          cut -d= -f1 .vercel/.env.preview.local | sort
-
       - name: Build
         run: |
-          set -a
-          source .vercel/.env.preview.local
-          set +a
+          # vercel build in CI ignores .env.preview.local; copy to .env.local
+          # which it does read for non-prod builds.
+          cp .vercel/.env.preview.local .vercel/.env.local
           vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy
@@ -101,17 +95,11 @@ jobs:
       - name: Pull Vercel env (staging)
         run: vercel pull --yes --environment=preview --git-branch=staging --token=${{ secrets.VERCEL_TOKEN }}
 
-      - name: Debug pulled env
-        run: |
-          ls -la .vercel/
-          echo "Variables present:"
-          cut -d= -f1 .vercel/.env.preview.local | sort
-
       - name: Build
         run: |
-          set -a
-          source .vercel/.env.preview.local
-          set +a
+          # vercel build in CI ignores .env.preview.local; copy to .env.local
+          # which it does read for non-prod builds.
+          cp .vercel/.env.preview.local .vercel/.env.local
           vercel build --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Deploy
