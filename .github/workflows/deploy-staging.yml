@@ -32,7 +32,7 @@ jobs:
       - name: Run migrations against staging DB
         run: doppler run --token=${{ secrets.DOPPLER_TOKEN_STG }} -- pnpm db:migrate
         env:
-          DOPPLER_PROJECT: restaurant-platform
+          DOPPLER_PROJECT: deliverse
           DOPPLER_CONFIG: stg
 
   deploy-platform:

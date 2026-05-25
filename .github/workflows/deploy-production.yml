@@ -35,7 +35,7 @@ jobs:
       - name: Run migrations against production DB
         run: doppler run --token=${{ secrets.DOPPLER_TOKEN_PRD }} -- pnpm db:migrate
         env:
-          DOPPLER_PROJECT: restaurant-platform
+          DOPPLER_PROJECT: deliverse
           DOPPLER_CONFIG: prd
 
       - name: Verify migration succeeded
