@@ -137,12 +137,11 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 Active project: **Phase 1 — Auth Vertical** (Linear, Urgent).
 Active milestone: **M1 — Auth end-to-end**.
-Recently shipped (M1): DEL-4 (email delivery architecture), DEL-3 (storefront tenant-scoped adapter — wraps Drizzle adapter, stamps tenant_id/current_brand_id/verification.type on creates, scopes reads on user + verification).
+Recently shipped (M1): DEL-5 (storefront OTP email via Inngest → Resend — first real transactional send; `@rp/emails` package filled in with pure handler + thin Inngest wrapper; brand-themed React Email template; package-local resolver with tenant-ownership defense-in-depth check), DEL-4 (email delivery architecture), DEL-3 (storefront tenant-scoped adapter — wraps Drizzle adapter, stamps tenant_id/current_brand_id/verification.type on creates, scopes reads on user + verification).
 
 Open M1 work:
-- DEL-3a — Storefront `tenant_end_user_accounts` tenant scoping for OAuth account lookup (Urgent, **blocks DEL-7 OAuth signup**).
-- DEL-5 — OTP via Resend (Urgent, unblocked by DEL-4).
-- DEL-6 — password reset + email verify via Resend (Urgent, unblocked by DEL-4).
+- DEL-3a / DEL-12 — Storefront `tenant_end_user_accounts` tenant scoping for OAuth account lookup (Urgent, **blocks DEL-7 OAuth signup**).
+- DEL-6 — password reset + email verify via Resend (Urgent, unblocked by DEL-4 + reuses DEL-5's pattern).
 - DEL-7 — Signup pages + cross-brand disclosure (non-OAuth flows unblocked by DEL-3; OAuth gated on DEL-3a).
 - DEL-8 — Re-enable E2E in CI.
 - DEL-9 — OTP rate limiting (additive).
@@ -171,6 +170,8 @@ Phase 0 (M0) closed 2026-05-25 — DEL-10 / DEL-11 / DEL-1 / DEL-2.
 - **Inngest local dev:** runs on separate port (8288). `inngest-cli dev` must be running.
 - **shadcn install:** `pnpm dlx shadcn@latest add` — uses `@latest`, not `add` legacy. Old commands fail.
 - **Storefront BA construction:** must go through `createStorefrontAuth(resolveTenantContext)` from `@rp/auth-core/storefront`. Bare `betterAuth(...)` skips the tenant-scoped adapter wrapper (DEL-3 / `docs/specs/storefront-tenant-scoping.md`) — every storefront write would lose `tenant_id` and every read would leak across tenants. The wrapper is unconditional; passing through resolves tenant from `Host` via `next/headers`.
+- **Inngest `/api/inngest` route must export `dynamic = 'force-dynamic'`** in the Next.js App Router (`apps/platform/src/app/api/inngest/route.ts`). Without it the route can be statically optimized and miss invocations from Inngest Cloud. Same route must NOT set `runtime = 'edge'` — `@rp/db` uses `postgres` which is Node-only.
+- **Inngest functions register in ONE place — `apps/platform/src/app/api/inngest/route.ts`** (per ADR-0009 #5). Both apps call `inngest.send(...)` via `@rp/emails/inngest`, but only the platform route hosts the function definitions. Double-registration causes duplicate sends (Inngest's fan-out is not dedupe).
 
 ---
 

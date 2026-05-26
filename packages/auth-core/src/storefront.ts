@@ -22,6 +22,7 @@
 
 import { db } from '@rp/db';
 import * as schema from '@rp/db/schema';
+import { inngest } from '@rp/emails/inngest';
 import { type BetterAuthOptions, betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { emailOTP } from 'better-auth/plugins';
@@ -175,7 +176,28 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
         expiresIn: 60 * 10,
         disableSignUp: false,
         sendVerificationOTP: async ({ email, otp, type }) => {
-          console.log(`[DEV] OTP for ${email} (${type}): ${otp}`);
+          // BA's emailOTP plugin uses hyphenated enum values
+          // ('sign-in' | 'email-verification' | 'forget-password'); our
+          // Inngest event schema (events.ts in @rp/emails) uses the
+          // snake_case verification-type values we standardized on in
+          // DEL-3 (see deriveVerificationType in storefront-verification-type.ts).
+          const eventType =
+            type === 'sign-in'
+              ? 'otp_login'
+              : type === 'email-verification'
+                ? 'email_verify'
+                : 'password_reset';
+          const ctx = await resolveTenantContext();
+          await inngest.send({
+            name: 'email.otp.requested',
+            data: {
+              email,
+              otp,
+              type: eventType,
+              tenantId: ctx.tenantId,
+              brandSlug: ctx.brandSlug,
+            },
+          });
         },
       }),
     ],

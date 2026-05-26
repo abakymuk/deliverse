@@ -141,3 +141,7 @@ Driven via Playwright's `request` fixture against `pizza-express.localhost:3001`
 ## 10. Known limitations after DEL-3 ships
 
 **OAuth account lookup remains globally scoped.** Until DEL-3a closes, a user signing in to brand-A's Google OAuth and then to brand-B's Google OAuth (different tenant) will incorrectly link to the brand-A user row via the unique `(provider_id, account_id)` index. The storefront BA instance is therefore safe to expose for **password + email-OTP** flows after DEL-3, but **must not** be exposed for OAuth signup until DEL-3a. DEL-7 enforces this gate.
+
+## 11. Amendments
+
+**2026-05-26 — [DEL-5](https://linear.app/oveglobal/issue/DEL-5):** `StorefrontTenantContext` extended from `{ tenantId, brandId }` to `{ tenantId, brandId, brandSlug }`. The storefront OTP send callback closes over `resolveTenantContext` and needs the slug (not the id) for the Inngest event payload. Adding the field to the existing context type avoids a sibling resolver callback (would double the per-request DB plumbing) and a second DB lookup (the slug is already on the resolved `BrandContext.brand.slug`). Wrapper behavior is **unchanged** — it still scopes by `tenantId`/`brandId` only; `brandSlug` is consumer-only. See [`docs/specs/otp-email.md`](./otp-email.md) §7 for the consumer.
