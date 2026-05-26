@@ -7,10 +7,26 @@
  *
  * The `type` prop drives the headline + the action verb; everything else is
  * shared across the three OTP flows.
+ *
+ * Shared layout chrome lives in `./_styles` (extracted in DEL-6 once we had
+ * three templates). OTP-specific `codeStyle` stays inline.
  */
 
 import type { Brand, Tenant } from '@rp/db';
 import { Body, Container, Head, Heading, Html, Img, Preview, Section, Text } from 'react-email';
+import {
+  DELIVERSE_PRIMARY,
+  bodyStyle,
+  brandHeadingStyle,
+  containerStyle,
+  contentStyle,
+  footerStyle,
+  footerTextStyle,
+  headerStyle,
+  headingStyle,
+  mutedTextStyle,
+  textStyle,
+} from './_styles';
 
 export type OtpEmailProps = {
   brand: Brand;
@@ -36,7 +52,7 @@ const COPY: Record<OtpEmailProps['type'], { heading: string; instruction: string
 
 export function OtpEmail({ brand, tenant, otp, type }: OtpEmailProps) {
   const { heading, instruction } = COPY[type];
-  const primary = brand.brandingJson?.primary ?? '#111827';
+  const primary = brand.brandingJson?.primary ?? DELIVERSE_PRIMARY;
   const logoUrl = brand.brandingJson?.logo;
 
   return (
@@ -81,50 +97,6 @@ export function OtpEmail({ brand, tenant, otp, type }: OtpEmailProps) {
   );
 }
 
-const bodyStyle = {
-  backgroundColor: '#f8fafc',
-  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif",
-  margin: '0',
-  padding: '0',
-};
-
-const containerStyle = {
-  margin: '0 auto',
-  maxWidth: '480px',
-  padding: '32px 16px',
-};
-
-const headerStyle = {
-  marginBottom: '24px',
-  textAlign: 'center' as const,
-};
-
-const brandHeadingStyle = {
-  fontSize: '24px',
-  fontWeight: '700',
-  margin: '0',
-};
-
-const contentStyle = {
-  backgroundColor: '#ffffff',
-  border: '1px solid #e5e7eb',
-  borderRadius: '8px',
-  padding: '32px 24px',
-};
-
-const headingStyle = {
-  fontSize: '20px',
-  fontWeight: '600',
-  margin: '0 0 16px 0',
-};
-
-const textStyle = {
-  color: '#374151',
-  fontSize: '16px',
-  lineHeight: '24px',
-  margin: '0 0 24px 0',
-};
-
 const codeStyle = {
   backgroundColor: '#f3f4f6',
   borderRadius: '6px',
@@ -137,24 +109,6 @@ const codeStyle = {
   margin: '0 0 24px 0',
   padding: '16px 24px',
   textAlign: 'center' as const,
-};
-
-const mutedTextStyle = {
-  color: '#6b7280',
-  fontSize: '14px',
-  lineHeight: '20px',
-  margin: '0',
-};
-
-const footerStyle = {
-  marginTop: '24px',
-  textAlign: 'center' as const,
-};
-
-const footerTextStyle = {
-  color: '#9ca3af',
-  fontSize: '12px',
-  margin: '0',
 };
 
 export default OtpEmail;

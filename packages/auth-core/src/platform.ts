@@ -8,13 +8,14 @@
  * are Drizzle property keys (camelCase), NOT SQL column names — see ADR 0007.
  */
 
+import { db } from '@rp/db';
+import * as schema from '@rp/db/schema';
+import { inngest } from '@rp/emails/inngest';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { organization } from 'better-auth/plugins';
 import { createAccessControl } from 'better-auth/plugins/access';
 import { defaultStatements } from 'better-auth/plugins/organization/access';
-import { db } from '@rp/db';
-import * as schema from '@rp/db/schema';
 
 const ac = createAccessControl(defaultStatements);
 
@@ -89,7 +90,10 @@ export const platformAuth = betterAuth({
     maxPasswordLength: 128,
     autoSignIn: false,
     sendResetPassword: async ({ user, url }) => {
-      console.log(`[DEV] Password reset for ${user.email}: ${url}`);
+      await inngest.send({
+        name: 'email.password_reset.requested',
+        data: { instance: 'platform', email: user.email, userId: user.id, url },
+      });
     },
   },
 
@@ -97,7 +101,10 @@ export const platformAuth = betterAuth({
     sendOnSignUp: true,
     autoSignInAfterVerification: true,
     sendVerificationEmail: async ({ user, url }) => {
-      console.log(`[DEV] Verify email for ${user.email}: ${url}`);
+      await inngest.send({
+        name: 'email.email_verification.requested',
+        data: { instance: 'platform', email: user.email, userId: user.id, url },
+      });
     },
   },
 
@@ -153,6 +160,4 @@ export const platformAuth = betterAuth({
 });
 
 export type PlatformAuth = typeof platformAuth;
-export type PlatformSession = Awaited<
-  ReturnType<typeof platformAuth.api.getSession>
->;
+export type PlatformSession = Awaited<ReturnType<typeof platformAuth.api.getSession>>;
