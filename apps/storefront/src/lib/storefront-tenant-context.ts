@@ -53,5 +53,6 @@ export async function resolveStorefrontTenantContext(): Promise<StorefrontTenant
   return {
     tenantId: brandContext.tenant.id,
     brandId: brandContext.brand.id,
+    brandSlug: brandContext.brand.slug,
   };
 }
