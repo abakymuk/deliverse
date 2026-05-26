@@ -26,6 +26,7 @@ After this issue ships: every BA-invoked email path in the workspace is real. Au
   - [`storefront.ts:131-133`](../../packages/auth-core/src/storefront.ts) — `emailAndPassword.sendResetPassword`.
 - **BA installed source** (verified at spec time):
   - `packages/auth-core/node_modules/better-auth/dist/api/routes/password.mjs:64` — `resetPasswordTokenExpiresIn || 3600 * 1` → reset link valid for **1 hour** by default. Our configs do not override.
+  - `packages/auth-core/node_modules/better-auth/dist/api/routes/password.mjs:72` — reset URL constructed as `${ctx.context.baseURL}/reset-password/<token>?callbackURL=<redirectTo>`. `ctx.context.baseURL` is **static** (frozen at init from `BETTER_AUTH_URL`). Storefront BA rewrites the origin per-request in its callback to the user's brand subdomain — see [DEL-15](https://linear.app/oveglobal/issue/DEL-15) + [`del-15-storefront-baseurl.md`](./del-15-storefront-baseurl.md).
   - `packages/auth-core/node_modules/better-auth/dist/api/routes/email-verification.mjs:12` — `expiresIn = 3600` → verification link also **1 hour**. Our configs do not override.
   - `packages/auth-core/node_modules/better-auth/dist/api/routes/email-verification.mjs:36` — endpoint is `createAuthEndpoint("/send-verification-email", …)`, mounted at `/api/auth/send-verification-email`.
 - **DEL-6 Linear AC** — see §3 reconciliation; AC #2 + AC #4 wording is stale and should be edited post-merge.
@@ -181,18 +182,29 @@ When `instance === 'platform'`, both new templates skip the brand-context block 
 
 ### 8a. Storefront `sendResetPassword` ([`storefront.ts:131-133`](../../packages/auth-core/src/storefront.ts))
 
-Closes over `resolveTenantContext` (already wired by DEL-3 + DEL-5). Reuses the exact pattern from the OTP callback.
+Closes over `resolveTenantContext` (already wired by DEL-3 + DEL-5). After DEL-15 also post-processes the BA-constructed URL so the origin matches the brand subdomain instead of the platform host.
 
 ```ts
 sendResetPassword: async ({ user, url }) => {
   const ctx = await resolveTenantContext();
+  // DEL-15: rewrite origin to user's brand subdomain — storefront BA can't
+  // use a static baseURL because it serves all brands from one instance.
+  const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
+  if (!baseDomain) throw new Error('NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN required');
+  const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+  const rewrittenUrl = rewriteStorefrontEmailUrl({
+    originalUrl: url,
+    brandSlug: ctx.brandSlug,
+    baseDomain,
+    proto,
+  });
   await inngest.send({
     name: 'email.password_reset.requested',
     data: {
       instance: 'storefront',
       email: user.email,
       userId: user.id,
-      url,
+      url: rewrittenUrl,
       tenantId: ctx.tenantId,
       brandSlug: ctx.brandSlug,
     },
