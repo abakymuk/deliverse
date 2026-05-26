@@ -25,6 +25,13 @@ import { deriveVerificationType } from './storefront-verification-type';
 export type StorefrontTenantContext = {
   tenantId: string;
   brandId: string;
+  /**
+   * Brand subdomain slug, e.g. 'pizza-express'. Added in DEL-5 so the storefront
+   * OTP callback can compose Inngest event payloads without a second DB lookup.
+   * The adapter wrapper itself does NOT read this field — it scopes writes by
+   * `tenantId`/`brandId` only. Consumer-only.
+   */
+  brandSlug: string;
 };
 
 export type ResolveTenantContext = () => Promise<StorefrontTenantContext>;
