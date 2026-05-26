@@ -240,7 +240,7 @@ pnpm dlx inngest-cli@latest dev
 doppler run --config dev -- env -u INNGEST_EVENT_KEY -u INNGEST_SIGNING_KEY INNGEST_DEV=1 pnpm dev
 ```
 
-**No clickable UI for these flows yet.** Platform has `/login` (DEL-2) and storefront has `/login` + `/verify-otp` (DEL-3); the `/forgot-password`, `/reset-password`, `/signup`, and `/verify-email` pages are scoped to **DEL-7**. Until DEL-7 ships, drive the smoke via BA API endpoints directly with `curl`. Browser navigation to `/forgot-password` returns 404 by design.
+**Clickable UI shipped in DEL-7** — `/signup`, `/forgot-password`, `/reset-password` pages now exist on both apps. The curl smoke below still works but you can also drive the same flows from the browser. The `redirectTo: '/reset-password'` in the curl recipes matches the DEL-7 page so the BA-constructed email link lands on the form (mandatory per `password.mjs:115` — without `redirectTo`, BA throws `INVALID_TOKEN`).
 
 For each flow, confirm: event fires with the right shape in Inngest dev UI (port 8288); handler runs green; platform terminal logs `[DEV] would send: { to, subject }` with correct subject and **no `url` in the log line** (same redaction discipline as the OTP path).
 
@@ -250,7 +250,7 @@ For each flow, confirm: event fires with the right shape in Inngest dev UI (port
    curl -X POST http://localhost:3000/api/auth/request-password-reset \
      -H 'Content-Type: application/json' \
      -H 'Origin: http://localhost:3000' \
-     -d '{"email":"admin@test.local","redirectTo":"/dashboard"}'
+     -d '{"email":"admin@test.local","redirectTo":"/reset-password"}'
    ```
 
 2. **Platform email verification** — endpoint `POST /api/auth/send-verification-email` (`email-verification.mjs:36`). BA no-ops if the user is already verified (`emailVerified: true`), so create a fresh user first via `POST /api/auth/sign-up/email` — `emailVerification.sendOnSignUp: true` on platform BA then triggers the verify callback automatically. Subject: `"Verify your Deliverse email"`. Event `data.instance === 'platform'`.
@@ -277,7 +277,7 @@ For each flow, confirm: event fires with the right shape in Inngest dev UI (port
      --resolve pizza-express.localhost:3001:127.0.0.1 \
      -H 'Content-Type: application/json' \
      -H 'Origin: http://pizza-express.localhost:3001' \
-     -d '{"email":"smoke-reset@example.com","redirectTo":"/"}'
+     -d '{"email":"smoke-reset@example.com","redirectTo":"/reset-password"}'
    ```
 
 ### 9c. DEL-6 Linear AC mapping (3-stub reality)
