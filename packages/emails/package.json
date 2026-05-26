@@ -10,11 +10,13 @@
     "./templates/*": "./src/templates/*.tsx"
   },
   "scripts": {
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@react-email/render": "^2.0.8",
     "@rp/db": "workspace:*",
+    "drizzle-orm": "^0.45.2",
     "inngest": "^4.4.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
