@@ -130,7 +130,18 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       maxPasswordLength: 128,
       autoSignIn: true,
       sendResetPassword: async ({ user, url }) => {
-        console.log(`[DEV] Password reset for ${user.email}: ${url}`);
+        const ctx = await resolveTenantContext();
+        await inngest.send({
+          name: 'email.password_reset.requested',
+          data: {
+            instance: 'storefront',
+            email: user.email,
+            userId: user.id,
+            url,
+            tenantId: ctx.tenantId,
+            brandSlug: ctx.brandSlug,
+          },
+        });
       },
     },
 
