@@ -1,0 +1,19 @@
+{
+  "name": "@rp/emails",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./client": "./src/client.ts",
+    "./events": "./src/events.ts",
+    "./inngest": "./src/inngest/index.ts",
+    "./templates/*": "./src/templates/*.tsx"
+  },
+  "scripts": {},
+  "dependencies": {},
+  "devDependencies": {
+    "@rp/typescript-config": "workspace:*",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
