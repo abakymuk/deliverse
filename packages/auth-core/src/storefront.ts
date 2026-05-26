@@ -28,6 +28,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { emailOTP } from 'better-auth/plugins';
 import { type ResolveTenantContext, wrappedStorefrontAdapter } from './storefront-adapter';
 import { isAllowedStorefrontOrigin } from './storefront-origin';
+import { rewriteStorefrontEmailUrl } from './storefront-url';
 
 export { isAllowedStorefrontOrigin };
 export type { ResolveTenantContext, StorefrontTenantContext } from './storefront-adapter';
@@ -131,13 +132,29 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       autoSignIn: true,
       sendResetPassword: async ({ user, url }) => {
         const ctx = await resolveTenantContext();
+        // DEL-15: BA freezes ctx.context.baseURL at init time from
+        // BETTER_AUTH_URL (= platform host). Storefront BA is multi-tenant,
+        // so we rewrite the origin per-request to the user's brand subdomain.
+        const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
+        if (!baseDomain) {
+          throw new Error(
+            'NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN is required for storefront BA reset URLs (DEL-15)',
+          );
+        }
+        const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+        const rewrittenUrl = rewriteStorefrontEmailUrl({
+          originalUrl: url,
+          brandSlug: ctx.brandSlug,
+          baseDomain,
+          proto,
+        });
         await inngest.send({
           name: 'email.password_reset.requested',
           data: {
             instance: 'storefront',
             email: user.email,
             userId: user.id,
-            url,
+            url: rewrittenUrl,
             tenantId: ctx.tenantId,
             brandSlug: ctx.brandSlug,
           },
