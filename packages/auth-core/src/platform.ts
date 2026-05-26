@@ -142,6 +142,37 @@ export const platformAuth = betterAuth({
       allowUserToCreateOrganization: false,
       organizationLimit: 10,
       membershipLimit: 100,
+      // DEL-13: BA's organization plugin does NOT construct the invite URL —
+      // the callback must build it from `data.id`. Default invitation TTL is
+      // 48h (BA's `invitationExpiresIn || 3600 * 48`). The URL points at
+      // platform's `/signup?token=<id>` page (DEL-7) which consumes the token
+      // and triggers the accept-invitation hook post-signup.
+      sendInvitationEmail: async (data) => {
+        const baseURL = process.env.BETTER_AUTH_URL;
+        if (!baseURL) {
+          throw new Error('BETTER_AUTH_URL is required for invitation emails (DEL-13)');
+        }
+        // `new URL(...)` instead of string concat avoids `https://host//signup`
+        // if BETTER_AUTH_URL has a trailing slash; keeps query encoding correct.
+        const inviteUrl = new URL('/signup', baseURL);
+        inviteUrl.searchParams.set('token', data.id);
+
+        await inngest.send({
+          name: 'email.invitation.requested',
+          data: {
+            instance: 'platform',
+            email: data.email,
+            invitationId: data.id,
+            role: data.role,
+            // Defensive fallbacks: BA permits empty user.name; our Zod schema
+            // requires .min(1). Without these, a blank name would poison the
+            // event forever under Inngest's retry policy.
+            inviterName: data.inviter.user.name || data.inviter.user.email || 'A teammate',
+            organizationName: data.organization.name || 'your organization',
+            url: inviteUrl.toString(),
+          },
+        });
+      },
       schema: {
         member: {
           fields: {

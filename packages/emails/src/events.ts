@@ -75,3 +75,37 @@ export const emailVerificationRequestedEvent = z.object({
 
 export type EmailVerificationRequestedEvent = z.infer<typeof emailVerificationRequestedEvent>;
 export type EmailVerificationRequestedData = EmailVerificationRequestedEvent['data'];
+
+// ── Invitation (platform only — DEL-13) ────────────────────────────────────
+//
+// Does NOT extend `transactionalEmailCommon` — invitation recipients haven't
+// signed up yet (no `platform_users` row to reference for `userId`).
+//
+// Deliberate exception from DEL-6 decision #2 ("url only — no token"):
+// `invitationId` is carried alongside `url`. The DEL-6 case was about
+// secret-bearing reset tokens; the invitation ID is lower-risk because BA's
+// accept path requires a signed-in, email-verified user whose email matches
+// the invitation row — the ID alone doesn't grant acceptance. Still
+// sensitive-ish: don't routinely log the full URL OR the raw `invitationId`
+// unless needed for debugging/audit.
+//
+// `role` is plumbed through for future copy/auditing use ("you've been
+// invited as a manager"); BA passes it on the callback, cheap to carry now.
+
+export const invitationRequestedEvent = z.object({
+  name: z.literal('email.invitation.requested'),
+  data: z.discriminatedUnion('instance', [
+    z.object({
+      instance: z.literal('platform'),
+      email: z.string().email(),
+      invitationId: z.string().uuid(),
+      role: z.string().min(1),
+      inviterName: z.string().min(1),
+      organizationName: z.string().min(1),
+      url: z.string().url(),
+    }),
+  ]),
+});
+
+export type InvitationRequestedEvent = z.infer<typeof invitationRequestedEvent>;
+export type InvitationRequestedData = InvitationRequestedEvent['data'];

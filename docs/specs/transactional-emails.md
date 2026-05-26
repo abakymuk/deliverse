@@ -231,6 +231,44 @@ sendVerificationEmail: async ({ user, url }) => {
 },
 ```
 
+### 8c. Platform `sendInvitationEmail` — DEL-13 follow-up
+
+DEL-13 wires the **4th transactional-email path**. Distinct from the 3 BA stubs DEL-6 closed: this lives on BA's `organization` plugin, not in the core `emailAndPassword` / `emailVerification` / `emailOTP` API. The DEL-6 §3 framing ("3 stubs, not 4") stays accurate as a snapshot of DEL-6's scope — DEL-13 simply adds a new path the DEL-6 stub table never covered.
+
+**BA gotcha — URL construction is on us.** Unlike `password.mjs:72` (which constructs the reset URL from `ctx.context.baseURL` + token), the organization plugin's invite endpoint does NOT construct the URL. The docstring in `node_modules/.pnpm/better-auth@1.6.11.../dist/plugins/organization/routes/crud-invites.mjs:196-204` is explicit: "Better Auth doesn't generate invitation URLs. You'll need to construct the URL using the invitation ID and pass it to the acceptInvitation endpoint." Our callback builds it via `new URL('/signup', baseURL)` + `searchParams.set('token', data.id)` (string concat would risk `https://host//signup` if `BETTER_AUTH_URL` carries a trailing slash).
+
+**TTL.** BA default is **48 hours** (`invitationExpiresIn || 3600 * 48`); we don't override. Longer than reset/verify (1h each) because invitations roundtrip through human admin → recipient.
+
+**Callback signature.** BA passes `{id, role, email, organization, invitation, inviter: {user}, request?}`. We use `data.id` (invitation row UUID) for both the URL and the event's `invitationId` field.
+
+**Event payload carries both `invitationId` and `url`** — deliberate exception from §4 decision #2 ("url only — no token"). The DEL-6 case was about secret-bearing reset tokens (compromise = ability to reset password). The invitation ID is lower-risk because BA's accept path requires a signed-in, email-verified user whose email matches the invitation row — the ID alone doesn't grant acceptance. Still **sensitive-ish** though: **logging rule — do not routinely log the full URL OR the raw `invitationId`** unless debugging/audit needs it. `role` is plumbed through for future copy/auditing use ("you've been invited as a manager").
+
+**Defensive name fallbacks.** BA permits empty `user.name` and `organization.name`, but our event schema requires `.min(1)`. The callback falls through `name → email → 'A teammate' / 'your organization'` so a blank BA-side name doesn't poison the event forever under Inngest's retry policy.
+
+```ts
+sendInvitationEmail: async (data) => {
+  const baseURL = process.env.BETTER_AUTH_URL;
+  if (!baseURL) {
+    throw new Error('BETTER_AUTH_URL is required for invitation emails (DEL-13)');
+  }
+  const inviteUrl = new URL('/signup', baseURL);
+  inviteUrl.searchParams.set('token', data.id);
+
+  await inngest.send({
+    name: 'email.invitation.requested',
+    data: {
+      instance: 'platform',
+      email: data.email,
+      invitationId: data.id,
+      role: data.role,
+      inviterName: data.inviter.user.name || data.inviter.user.email || 'A teammate',
+      organizationName: data.organization.name || 'your organization',
+      url: inviteUrl.toString(),
+    },
+  });
+},
+```
+
 ## 9. Verification
 
 ### 9a. Automated (CI)
