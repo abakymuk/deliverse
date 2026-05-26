@@ -17,21 +17,6 @@
 import type { ReactElement } from 'react';
 import { Resend } from 'resend';
 
-const apiKey = process.env.RESEND_API_KEY;
-const fromEmail = process.env.RESEND_FROM_EMAIL;
-const isProd = process.env.NODE_ENV === 'production';
-
-if (isProd) {
-  if (!apiKey) {
-    throw new Error('emails: RESEND_API_KEY is required when NODE_ENV=production');
-  }
-  if (!fromEmail) {
-    throw new Error('emails: RESEND_FROM_EMAIL is required when NODE_ENV=production');
-  }
-}
-
-const resend = apiKey ? new Resend(apiKey) : null;
-
 export class EmailSendError extends Error {
   constructor(
     message: string,
@@ -49,13 +34,42 @@ export type SendEmailArgs = {
   text?: string;
 };
 
+/**
+ * Module-load is too early to throw on missing env. Next 16's `next build`
+ * evaluates the App Router route graph with NODE_ENV=production set, which
+ * would crash the build if RESEND_API_KEY isn't in the build environment
+ * (it shouldn't have to be — the key only needs to be present at request
+ * time on the deployed server). So defer the env check to first call.
+ */
+let resendInstance: Resend | null | undefined;
+
+function getResend(): Resend | null {
+  if (resendInstance !== undefined) return resendInstance;
+
+  const apiKey = process.env.RESEND_API_KEY;
+  const isProd = process.env.NODE_ENV === 'production';
+
+  if (isProd) {
+    if (!apiKey) {
+      throw new EmailSendError('RESEND_API_KEY is required when NODE_ENV=production');
+    }
+    if (!process.env.RESEND_FROM_EMAIL) {
+      throw new EmailSendError('RESEND_FROM_EMAIL is required when NODE_ENV=production');
+    }
+  }
+
+  resendInstance = apiKey ? new Resend(apiKey) : null;
+  return resendInstance;
+}
+
 export async function sendEmail(args: SendEmailArgs): Promise<{ id: string }> {
+  const resend = getResend();
   if (!resend) {
     console.warn(`[DEV] would send: ${JSON.stringify({ to: args.to, subject: args.subject })}`);
     return { id: 'dev-noop' };
   }
 
-  const from = fromEmail ?? 'onboarding@resend.dev';
+  const from = process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev';
   const result = await resend.emails.send({
     from,
     to: args.to,
