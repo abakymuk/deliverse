@@ -9,7 +9,11 @@
 import assert from 'node:assert/strict';
 import { isAllowedStorefrontOrigin } from '../src/storefront-origin.ts';
 
-const cases: { args: [string | null | undefined, string | undefined]; expected: boolean; label: string }[] = [
+const cases: {
+  args: [string | null | undefined, string | undefined];
+  expected: boolean;
+  label: string;
+}[] = [
   {
     args: ['pizza-express.deliverse.app', 'deliverse.app'],
     expected: true,
@@ -45,6 +49,16 @@ const cases: { args: [string | null | undefined, string | undefined]; expected: 
     expected: false,
     label: 'missing base domain env → rejected',
   },
+  {
+    args: ['pizza-express.localhost:3001', 'http://localhost:3001'],
+    expected: true,
+    label: 'base domain with scheme + port → allowed (scheme stripped)',
+  },
+  {
+    args: ['pizza-express.deliverse.app', 'https://deliverse.app'],
+    expected: true,
+    label: 'base domain with https scheme → allowed',
+  },
 ];
 
 let failed = 0;
@@ -55,7 +69,9 @@ for (const c of cases) {
     console.log(`✓ ${c.label}`);
   } catch {
     failed++;
-    console.error(`✗ ${c.label}\n    args=${JSON.stringify(c.args)} expected=${c.expected} actual=${actual}`);
+    console.error(
+      `✗ ${c.label}\n    args=${JSON.stringify(c.args)} expected=${c.expected} actual=${actual}`,
+    );
   }
 }
 

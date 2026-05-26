@@ -7,209 +7,180 @@
  * Mappings per docs/specs/better-auth-config-v1.md §8. All `fields:` values
  * are Drizzle property keys (camelCase), NOT SQL column names — see ADR 0007.
  *
- * SCOPE WARNING (DEL-11): this instance is guard-only. Every write path that
- * needs tenantId / currentBrandId / verification.type throws a typed
- * BetterAuthError because hooks cannot inject `input:false` fields (two-pass
- * input parser — see spec §4). DEL-3 wires the real tenant injection.
+ * SCOPE (DEL-3): the storefront BA is now constructed via the factory
+ * `createStorefrontAuth(resolveTenantContext)` and wraps the Drizzle adapter
+ * via `wrappedStorefrontAdapter` (docs/specs/storefront-tenant-scoping.md).
+ * The wrapper stamps `tenant_id` / `current_brand_id` / `verification.type`
+ * on creates and adds `tenant_id` predicates on reads for the
+ * `user` and `verification` models.
+ *
+ * REMAINING GAP (TODO DEL-3a): the `account` model is NOT wrapped because
+ * `tenant_end_user_accounts(provider_id, account_id)` is globally unique.
+ * This breaks OAuth account lookup across tenants. DEL-7 OAuth signup MUST
+ * NOT ship until DEL-3a closes (schema delta + adapter scoping for `account`).
  */
 
-import { betterAuth, BetterAuthError } from 'better-auth';
-import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { emailOTP } from 'better-auth/plugins';
 import { db } from '@rp/db';
 import * as schema from '@rp/db/schema';
+import { type BetterAuthOptions, betterAuth } from 'better-auth';
+import { drizzleAdapter } from 'better-auth/adapters/drizzle';
+import { emailOTP } from 'better-auth/plugins';
+import { type ResolveTenantContext, wrappedStorefrontAdapter } from './storefront-adapter';
 import { isAllowedStorefrontOrigin } from './storefront-origin';
 
 export { isAllowedStorefrontOrigin };
+export type { ResolveTenantContext, StorefrontTenantContext } from './storefront-adapter';
 
-export const storefrontAuth = betterAuth({
-  database: drizzleAdapter(db, {
-    provider: 'pg',
-    schema: {
-      user: schema.tenantEndUsers,
-      account: schema.tenantEndUserAccounts,
-      session: schema.tenantEndUserSessions,
-      verification: schema.tenantEndUserVerifications,
-    },
-  }),
+export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext) {
+  return betterAuth({
+    database: (options: BetterAuthOptions) =>
+      wrappedStorefrontAdapter(
+        drizzleAdapter(db, {
+          provider: 'pg',
+          schema: {
+            user: schema.tenantEndUsers,
+            account: schema.tenantEndUserAccounts,
+            session: schema.tenantEndUserSessions,
+            verification: schema.tenantEndUserVerifications,
+          },
+        })(options),
+        resolveTenantContext,
+      ),
 
-  secret: process.env.BETTER_AUTH_SECRET,
+    secret: process.env.BETTER_AUTH_SECRET,
 
-  user: {
-    fields: {
-      emailVerified: 'emailVerified',
-      image: 'imageUrl',
-    },
-    additionalFields: {
-      tenantId: {
-        type: 'string',
-        required: false,
-        input: false,
-      },
-      phone: {
-        type: 'string',
-        required: false,
-      },
-      deletedAt: {
-        type: 'date',
-        required: false,
-        input: false,
-      },
-    },
-  },
-
-  account: {
-    fields: {
-      userId: 'tenantEndUserId',
-    },
-  },
-
-  session: {
-    fields: {
-      userId: 'tenantEndUserId',
-    },
-    additionalFields: {
-      currentBrandId: {
-        type: 'string',
-        required: false,
-        input: false,
-      },
-    },
-    expiresIn: 60 * 60 * 24 * 30,
-    updateAge: 60 * 60 * 24 * 7,
-    cookieCache: {
-      enabled: true,
-      maxAge: 60 * 5,
-    },
-  },
-
-  verification: {
-    additionalFields: {
-      tenantId: {
-        type: 'string',
-        required: false,
-        input: false,
-      },
-      brandId: {
-        type: 'string',
-        required: false,
-        input: false,
-      },
-      type: {
-        type: 'string',
-        required: false,
-        input: false,
-      },
-      attempts: {
-        type: 'number',
-        required: false,
-        input: false,
-        defaultValue: 0,
-      },
-    },
-  },
-
-  emailAndPassword: {
-    enabled: true,
-    minPasswordLength: 8,
-    maxPasswordLength: 128,
-    autoSignIn: true,
-    sendResetPassword: async ({ user, url }) => {
-      console.log(`[DEV] Password reset for ${user.email}: ${url}`);
-    },
-  },
-
-  socialProviders: {
-    google: {
-      clientId: process.env.GOOGLE_CLIENT_ID || '',
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
-    },
-  },
-
-  advanced: {
-    // BA generates IDs for sessions/accounts/verifications. Our schema columns
-    // are `uuid` type (DEL-10), so BA's default base64-ish IDs would fail with
-    // PostgresError: invalid input syntax for type uuid. The 'uuid' magic
-    // string tells BA to emit RFC-4122 UUIDs via crypto.randomUUID().
-    database: {
-      generateId: 'uuid',
-    },
-    cookiePrefix: 'rp_store',
-    crossSubDomainCookies: {
-      enabled: false,
-    },
-    defaultCookieAttributes: {
-      sameSite: 'lax',
-      secure: process.env.NODE_ENV === 'production',
-      httpOnly: true,
-    },
-  },
-
-  trustedOrigins: async (request) => {
-    if (!request) return [];
-    const host = request.headers.get('host');
-    const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
-    if (!host || !isAllowedStorefrontOrigin(host, baseDomain)) return [];
-    const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
-    return [`${proto}://${host.toLowerCase()}`];
-  },
-
-  databaseHooks: {
     user: {
-      create: {
-        before: async (user) => {
-          if (!(user as { tenantId?: string }).tenantId) {
-            throw new BetterAuthError(
-              'tenant_id missing on storefront user create (DEL-11 stub; DEL-3 wires the real injection path)',
-            );
-          }
+      fields: {
+        emailVerified: 'emailVerified',
+        image: 'imageUrl',
+      },
+      additionalFields: {
+        tenantId: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
+        phone: {
+          type: 'string',
+          required: false,
+        },
+        deletedAt: {
+          type: 'date',
+          required: false,
+          input: false,
         },
       },
     },
+
+    account: {
+      fields: {
+        userId: 'tenantEndUserId',
+      },
+    },
+
     session: {
-      create: {
-        before: async (session) => {
-          if (!(session as { currentBrandId?: string }).currentBrandId) {
-            throw new BetterAuthError(
-              'current_brand_id missing on storefront session create (DEL-11 stub; DEL-3 wires the real injection path)',
-            );
-          }
+      fields: {
+        userId: 'tenantEndUserId',
+      },
+      additionalFields: {
+        currentBrandId: {
+          type: 'string',
+          required: false,
+          input: false,
         },
       },
+      expiresIn: 60 * 60 * 24 * 30,
+      updateAge: 60 * 60 * 24 * 7,
+      cookieCache: {
+        enabled: true,
+        maxAge: 60 * 5,
+      },
     },
+
     verification: {
-      create: {
-        before: async (verification) => {
-          const v = verification as { tenantId?: string; type?: string };
-          if (!v.tenantId) {
-            throw new BetterAuthError(
-              'tenant_id missing on storefront verification create (DEL-11 stub; DEL-3 wires the real injection path)',
-            );
-          }
-          if (!v.type) {
-            throw new BetterAuthError(
-              'verification.type missing (must be one of otp_login | email_verify | password_reset) — DEL-11 stub; DEL-3 wires the real injection path',
-            );
-          }
+      additionalFields: {
+        tenantId: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
+        brandId: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
+        type: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
+        attempts: {
+          type: 'number',
+          required: false,
+          input: false,
+          defaultValue: 0,
         },
       },
     },
-  },
 
-  plugins: [
-    emailOTP({
-      storeOTP: 'hashed',
-      otpLength: 6,
-      expiresIn: 60 * 10,
-      disableSignUp: false,
-      sendVerificationOTP: async ({ email, otp, type }) => {
-        console.log(`[DEV] OTP for ${email} (${type}): ${otp}`);
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 8,
+      maxPasswordLength: 128,
+      autoSignIn: true,
+      sendResetPassword: async ({ user, url }) => {
+        console.log(`[DEV] Password reset for ${user.email}: ${url}`);
       },
-    }),
-  ],
-});
+    },
 
-export type StorefrontAuth = typeof storefrontAuth;
-export type StorefrontSession = Awaited<
-  ReturnType<typeof storefrontAuth.api.getSession>
->;
+    socialProviders: {
+      google: {
+        clientId: process.env.GOOGLE_CLIENT_ID || '',
+        clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+      },
+    },
+
+    advanced: {
+      // BA generates IDs for sessions/accounts/verifications. Our schema columns
+      // are `uuid` type (DEL-10), so BA's default base64-ish IDs would fail with
+      // PostgresError: invalid input syntax for type uuid. The 'uuid' magic
+      // string tells BA to emit RFC-4122 UUIDs via crypto.randomUUID().
+      database: {
+        generateId: 'uuid',
+      },
+      cookiePrefix: 'rp_store',
+      crossSubDomainCookies: {
+        enabled: false,
+      },
+      defaultCookieAttributes: {
+        sameSite: 'lax',
+        secure: process.env.NODE_ENV === 'production',
+        httpOnly: true,
+      },
+    },
+
+    trustedOrigins: async (request) => {
+      if (!request) return [];
+      const host = request.headers.get('host');
+      const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
+      if (!host || !isAllowedStorefrontOrigin(host, baseDomain)) return [];
+      const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
+      return [`${proto}://${host.toLowerCase()}`];
+    },
+
+    plugins: [
+      emailOTP({
+        storeOTP: 'hashed',
+        otpLength: 6,
+        expiresIn: 60 * 10,
+        disableSignUp: false,
+        sendVerificationOTP: async ({ email, otp, type }) => {
+          console.log(`[DEV] OTP for ${email} (${type}): ${otp}`);
+        },
+      }),
+    ],
+  });
+}
+
+export type StorefrontAuth = ReturnType<typeof createStorefrontAuth>;
+export type StorefrontSession = Awaited<ReturnType<StorefrontAuth['api']['getSession']>>;
