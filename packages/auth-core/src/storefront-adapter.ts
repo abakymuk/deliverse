@@ -36,7 +36,7 @@ export type StorefrontTenantContext = {
 
 export type ResolveTenantContext = () => Promise<StorefrontTenantContext>;
 
-const SCOPED_MODELS = new Set(['user', 'verification']);
+const SCOPED_MODELS = new Set(['user', 'verification', 'account']);
 
 function tenantPredicate(tenantId: string): Where {
   return {
@@ -95,6 +95,21 @@ function wrapMethods(
             brandId: ctx.brandId,
             type,
           },
+          select,
+          forceAllowId,
+        });
+      }
+      if (model === 'account') {
+        // DEL-12: stamps `tenantId` on the credential or OAuth account row.
+        // Together with the schema migration (composite unique on
+        // (tenant_id, provider_id, account_id)) this lets the same Google
+        // account ID link to two independent tenant_end_users across tenants.
+        // Requires `account.additionalFields.tenantId` in storefront.ts BA
+        // config — without it the factory's transformInput drops the field.
+        const ctx = await resolveTenantContext();
+        return inner.create({
+          model,
+          data: { ...data, tenantId: ctx.tenantId },
           select,
           forceAllowId,
         });

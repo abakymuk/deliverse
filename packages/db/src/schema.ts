@@ -545,11 +545,19 @@ export const tenantEndUsers = pgTable('tenant_end_users', {
 export const tenantEndUserAccounts = pgTable('tenant_end_user_accounts', {
   id: uuid('id').primaryKey().defaultRandom(),
 
+  // DEL-12: tenant scoping for OAuth uniqueness. (provider_id, account_id) was
+  // globally unique pre-DEL-12 — a Google account could only link to one
+  // tenant_end_user globally. Now uniqueness is per-tenant, so the same Google
+  // account at Tenant A vs Tenant B creates two independent account rows.
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
   tenantEndUserId: uuid('tenant_end_user_id')
     .notNull()
     .references(() => tenantEndUsers.id, { onDelete: 'cascade' }),
 
-  providerId: text('provider_id').notNull(),  // "credentials" | "google"
+  providerId: text('provider_id').notNull(),  // "credential" | "google"
   accountId: text('account_id').notNull(),
 
   // For password auth (HYBRID variant — end users CAN have password)
@@ -566,8 +574,10 @@ export const tenantEndUserAccounts = pgTable('tenant_end_user_accounts', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  providerAccountIdx: uniqueIndex('tenant_end_user_accounts_provider_account_idx')
-    .on(t.providerId, t.accountId),
+  // DEL-12: replaces the global unique(provider_id, account_id) with a
+  // tenant-scoped one. See docs/specs/del-12-account-tenant-scoping.md.
+  tenantProviderAccountIdx: uniqueIndex('tenant_end_user_accounts_tenant_provider_account_idx')
+    .on(t.tenantId, t.providerId, t.accountId),
 
   userIdx: index('tenant_end_user_accounts_user_idx').on(t.tenantEndUserId),
 }));

@@ -7,17 +7,14 @@
  * Mappings per docs/specs/better-auth-config-v1.md §8. All `fields:` values
  * are Drizzle property keys (camelCase), NOT SQL column names — see ADR 0007.
  *
- * SCOPE (DEL-3): the storefront BA is now constructed via the factory
+ * SCOPE (DEL-3 + DEL-12): the storefront BA is constructed via the factory
  * `createStorefrontAuth(resolveTenantContext)` and wraps the Drizzle adapter
  * via `wrappedStorefrontAdapter` (docs/specs/storefront-tenant-scoping.md).
  * The wrapper stamps `tenant_id` / `current_brand_id` / `verification.type`
  * on creates and adds `tenant_id` predicates on reads for the
- * `user` and `verification` models.
- *
- * REMAINING GAP (TODO DEL-3a): the `account` model is NOT wrapped because
- * `tenant_end_user_accounts(provider_id, account_id)` is globally unique.
- * This breaks OAuth account lookup across tenants. DEL-7 OAuth signup MUST
- * NOT ship until DEL-3a closes (schema delta + adapter scoping for `account`).
+ * `user`, `verification`, and `account` models. OAuth signup is unblocked
+ * as of DEL-12 (schema migration 0002 + `account.additionalFields.tenantId`
+ * registration below + `account` added to `SCOPED_MODELS`).
  */
 
 import { db } from '@rp/db';
@@ -77,6 +74,18 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
     account: {
       fields: {
         userId: 'tenantEndUserId',
+      },
+      additionalFields: {
+        // DEL-12: BA's getAuthTables(options) only transforms fields it knows
+        // about. Without this registration, the adapter wrapper's injected
+        // data.tenantId on account.create would be dropped by the factory's
+        // transformInput (@better-auth/core/dist/db/adapter/factory.mjs).
+        // `input: false` is defense-in-depth — external callers cannot spoof.
+        tenantId: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
       },
     },
 
