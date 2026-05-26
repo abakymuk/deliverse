@@ -209,4 +209,22 @@ test.describe
         .where(eq(tenantEndUsers.email, email));
       expect(rows.length, 'no row may be written when brand context missing').toBe(0);
     });
+
+    // DEL-12: cross-tenant OAuth account isolation. Skipped until DEL-8 lands a
+    // multi-tenant seed + a Google OAuth test-double. The unit-level coverage
+    // for the adapter wrapper lives in packages/auth-core/src/storefront-adapter.test.ts
+    // (10 cases). The Path A staging+prd smoke verifies the BA-config layer
+    // end-to-end (signup → SELECT tenant_id). What this skipped E2E would add
+    // when DEL-8 unblocks it: a real Google OAuth round-trip at two tenants
+    // proving (provider_id, account_id, tenant_id) uniqueness at the HTTP layer.
+    test.skip('DEL-12 cross-tenant OAuth — same Google account at two tenants creates two rows', async () => {
+      // Pending DEL-8 multi-tenant seed + Google OAuth test-double.
+      // Expected behavior post-impl:
+      //   1. Sign in via Google at pizza-express → creates account A
+      //      with (provider_id='google', account_id='<google-uid>', tenant_id=hospitality_group)
+      //   2. Sign in via Google at burger-heaven-other-co (second tenant) with SAME Google account →
+      //      creates account B with same provider_id/account_id but tenant_id=other_co.
+      //      No 422/409. Two distinct rows in tenant_end_user_accounts.
+      //   3. Sessions are independent; user A and user B have no relationship.
+    });
   });
