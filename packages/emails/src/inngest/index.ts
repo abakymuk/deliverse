@@ -9,9 +9,15 @@
  */
 
 import type { InngestFunction } from 'inngest';
+import { emailVerificationRequestedHandler } from './email-verify';
 import { otpRequestedHandler } from './otp';
+import { passwordResetRequestedHandler } from './password-reset';
 
 export { inngest } from './client';
-export { otpRequestedHandler };
+export { emailVerificationRequestedHandler, otpRequestedHandler, passwordResetRequestedHandler };
 
-export const functions: InngestFunction.Any[] = [otpRequestedHandler];
+export const functions: InngestFunction.Any[] = [
+  otpRequestedHandler,
+  passwordResetRequestedHandler,
+  emailVerificationRequestedHandler,
+];

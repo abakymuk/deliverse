@@ -82,3 +82,7 @@ This is a **decision issue — DEL-4 ships no app code**. Implementation lands i
 - [Inngest function registration / serve handlers](https://www.inngest.com/docs/learn/serving-inngest-functions).
 - [ADR-0002](./0002-better-auth-vs-clerk.md) — auth choice (BA is the trigger for the send hooks).
 - [ADR-0008](./0008-shadcn-and-form-deps.md) — same "write the ADR against the actual CLI diff" pattern this issue inherits.
+
+## Amendments
+
+**2026-05-26 — [DEL-6](https://linear.app/oveglobal/issue/DEL-6):** added `email.password_reset.requested` + `email.email_verification.requested` event schemas to `packages/emails/src/events.ts` (Zod discriminated unions on `instance` per §"Decisions" #3). Inngest function registry now exports three handlers (still single registration point per #5). Shared layout chrome extracted from `templates/otp.tsx` into `templates/_styles.ts` once the package had three templates. The email-verification event has only a `platform` variant today — the discriminated-union shape is preserved so a future storefront variant (only meaningful if `emailAndPassword.requireEmailVerification` is ever flipped on the storefront BA) is an additive change. See [`docs/specs/transactional-emails.md`](../specs/transactional-emails.md) for the implementation reference.

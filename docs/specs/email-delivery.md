@@ -61,7 +61,10 @@ DEL-5/DEL-6 must hit each callback signature verbatim. These are the contract.
 | `emailAndPassword.sendResetPassword` | storefront | `async ({ user, url }) => …` | `email.password_reset.requested` with `instance: 'storefront'` (carries `tenantId` + `brandSlug` from a request-scoped resolver — DEL-3's surface) |
 | `emailOTP.sendVerificationOTP` | storefront | `async ({ email, otp, type }) => …` where `type ∈ { 'otp_login', 'email_verify', 'password_reset' }` | `email.otp.requested` (storefront-only event; always carries `tenantId` + `brandSlug`) |
 
-The platform stubs at [`platform.ts:91-101`](../../packages/auth-core/src/platform.ts) and the storefront `sendResetPassword` stub at [`storefront.ts:131-133`](../../packages/auth-core/src/storefront.ts) stay as `console.log` until DEL-6 swaps the body for `inngest.send(...)`. The storefront `sendVerificationOTP` stub was replaced by DEL-5 — see [`docs/specs/otp-email.md`](./otp-email.md) for the implementation reference.
+All four BA callbacks are now real:
+
+- The storefront `sendVerificationOTP` was wired by DEL-5 — see [`docs/specs/otp-email.md`](./otp-email.md).
+- The other three (platform `sendResetPassword` + `sendVerificationEmail`, storefront `sendResetPassword`) were wired by DEL-6 — see [`docs/specs/transactional-emails.md`](./transactional-emails.md). Note: there is no non-OTP storefront `sendVerificationEmail` because `emailAndPassword.requireEmailVerification` is unset on the storefront BA; verification UX on the storefront is OTP-shaped via DEL-5's `email_verify` type.
 
 ## 6. Inngest event schemas
 
