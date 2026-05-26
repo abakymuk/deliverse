@@ -1,97 +1,40 @@
 /**
- * Tenant resolution: subdomain → brand → tenant
+ * Tenant resolution: subdomain → brand → tenant (app-side helpers).
  *
- * Storefront URLs are `{brand-slug}.deliverse.app`.
- * Every request needs to resolve which brand (and thus which tenant)
- * the user is interacting with.
- *
+ * The pure `extractBrandSlug` logic lives in `@rp/auth-core/storefront-host`
+ * (so the BA adapter wrapper can use it without an apps→packages dep).
  * This module:
- * 1. Extracts brand slug from Host header
- * 2. Looks up brand in DB
- * 3. Returns full context (brand, tenant, theme)
- *
- * Cached per-request via React `cache()` (server components only).
+ *   - wraps `extractBrandSlug` to read `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN`
+ *     from env (preserving the existing proxy + server-component API),
+ *   - exports the React-`cache()`-memoized `getBrandContext(slug)` for
+ *     server components that read the proxy-injected `x-brand-slug` header.
  */
 
+import { extractBrandSlug as extractBrandSlugFromHost } from '@rp/auth-core/storefront-host';
+import { resolveBrandBySlug } from '@rp/auth-core/storefront-tenant-resolver';
+import type { BrandContext } from '@rp/auth-core/storefront-tenant-resolver';
 import { cache } from 'react';
-import { eq, and, isNull } from 'drizzle-orm';
-import { db, brands, tenants, type Brand, type Tenant } from '@rp/db';
 
-export type BrandContext = {
-  brand: Brand;
-  tenant: Tenant;
-};
+export type { BrandContext };
 
 /**
- * Extract brand slug from Host header.
+ * Extract the brand slug from a Host header value, using
+ * `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` as the base.
  *
- * Examples:
- *   "pizza-express.deliverse.app" → "pizza-express"
- *   "pizza-express.localhost:3001" → "pizza-express"
- *   "deliverse.app" → null (root domain, no brand)
- *
- * Uses NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN to determine the base.
+ * Throws if the env var is not set — that's a config error, not a request error.
  */
 export function extractBrandSlug(host: string | null): string | null {
-  if (!host) return null;
-
   const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
   if (!baseDomain) {
     throw new Error('NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN not set');
   }
-
-  // Strip port (for local dev like localhost:3001)
-  const [hostWithoutPort = ''] = host.split(':');
-  const [baseWithoutPort = ''] = baseDomain.split(':');
-
-  if (hostWithoutPort === baseWithoutPort) {
-    return null; // Root domain, no brand
-  }
-
-  if (!hostWithoutPort.endsWith(`.${baseWithoutPort}`)) {
-    return null; // Not a subdomain of our base
-  }
-
-  const subdomain = hostWithoutPort.slice(0, -(baseWithoutPort.length + 1));
-  // Subdomain might have multiple parts (e.g., "www.pizza-express")
-  // Take the first segment as brand
-  const [brandSlug = ''] = subdomain.split('.');
-
-  // Reserved subdomains that are not brand storefronts
-  const RESERVED = new Set(['www', 'admin', 'api', 'app']);
-  if (!brandSlug || RESERVED.has(brandSlug)) {
-    return null;
-  }
-
-  return brandSlug;
+  return extractBrandSlugFromHost(host, baseDomain);
 }
 
 /**
  * Resolve brand + tenant from a slug.
  * Cached per request — multiple components can call this without DB hit.
  */
-export const getBrandContext = cache(async (
-  brandSlug: string
-): Promise<BrandContext | null> => {
-  const result = await db
-    .select({
-      brand: brands,
-      tenant: tenants,
-    })
-    .from(brands)
-    .innerJoin(tenants, eq(brands.tenantId, tenants.id))
-    .where(
-      and(
-        eq(brands.slug, brandSlug),
-        isNull(brands.deletedAt),
-        isNull(tenants.deletedAt),
-        eq(tenants.status, 'active'),
-        eq(brands.isActive, true)
-      )
-    )
-    .limit(1);
-
-  if (!result[0]) return null;
-
-  return result[0];
+export const getBrandContext = cache(async (brandSlug: string): Promise<BrandContext | null> => {
+  return resolveBrandBySlug(brandSlug);
 });

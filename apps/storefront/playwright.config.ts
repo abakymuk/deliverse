@@ -12,13 +12,15 @@ export default defineConfig({
     trace: 'on-first-retry',
     screenshot: 'only-on-failure',
   },
-  projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
-  ],
+  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {
     command: 'pnpm dev',
-    url: 'http://localhost:3001',
+    // BA's session endpoint returns 200 with body `null` when no session is
+    // active — a real readiness signal. The bare `/` route returns 404
+    // because the storefront proxy requires a brand subdomain, and 404 isn't
+    // accepted by Playwright's webServer probe.
+    url: 'http://localhost:3001/api/auth/get-session',
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000,
+    timeout: 240 * 1000,
   },
 });

@@ -6,7 +6,11 @@
   "exports": {
     ".": "./src/index.ts",
     "./platform": "./src/platform.ts",
-    "./storefront": "./src/storefront.ts"
+    "./storefront": "./src/storefront.ts",
+    "./storefront-adapter": "./src/storefront-adapter.ts",
+    "./storefront-host": "./src/storefront-host.ts",
+    "./storefront-tenant-resolver": "./src/storefront-tenant-resolver.ts",
+    "./storefront-verification-type": "./src/storefront-verification-type.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"
@@ -20,6 +24,7 @@
   "devDependencies": {
     "@rp/typescript-config": "workspace:*",
     "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
 }

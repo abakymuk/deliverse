@@ -135,22 +135,19 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 > **Linear is the source of truth for what we're working on.** This section mirrors the active project + milestone in Linear at a glance; the canonical state is in Linear. See `docs/linear-workflow.md` for the rules.
 
-Active project: **Phase 0 — Foundation** (Linear, Urgent, target 2026-06-08).
-Active milestone: **M0 — Local-dev unblock**.
-Current `Todo`: **DEL-10** — Drizzle schema v1: Better Auth-compatible identity schema.
+Active project: **Phase 1 — Auth Vertical** (Linear, Urgent).
+Active milestone: **M1 — Auth end-to-end**.
+Recently shipped (M1): DEL-4 (email delivery architecture), DEL-3 (storefront tenant-scoped adapter — wraps Drizzle adapter, stamps tenant_id/current_brand_id/verification.type on creates, scopes reads on user + verification).
 
-Phase 0 (M0) backlog after DEL-10:
-- DEL-11 — Better Auth config v1: field mappings, plugins, OTP storage (Urgent, blocked by DEL-10)
-- DEL-1 — Seed script (Urgent, blocked by DEL-11)
-- DEL-2 — Install shadcn primitives + rewrite login forms (High, relatedTo DEL-1)
+Open M1 work:
+- DEL-3a — Storefront `tenant_end_user_accounts` tenant scoping for OAuth account lookup (Urgent, **blocks DEL-7 OAuth signup**).
+- DEL-5 — OTP via Resend (Urgent, unblocked by DEL-4).
+- DEL-6 — password reset + email verify via Resend (Urgent, unblocked by DEL-4).
+- DEL-7 — Signup pages + cross-brand disclosure (non-OAuth flows unblocked by DEL-3; OAuth gated on DEL-3a).
+- DEL-8 — Re-enable E2E in CI.
+- DEL-9 — OTP rate limiting (additive).
 
-Phase 1 — Auth Vertical (M1 — Auth end-to-end):
-- DEL-3 — Storefront `tenant_id` injection (Urgent)
-- DEL-4 — Email delivery architecture (Urgent)
-- DEL-5 / DEL-6 — OTP + transactional emails via Inngest → Resend
-- DEL-7 — Signup pages + cross-brand disclosure
-- DEL-8 — Re-enable E2E in CI
-- DEL-9 — OTP rate limiting
+Phase 0 (M0) closed 2026-05-25 — DEL-10 / DEL-11 / DEL-1 / DEL-2.
 
 **Definition of Done (per feature):**
 1. Spec in `docs/specs/<feature>.md` (one page max)
@@ -173,6 +170,7 @@ Phase 1 — Auth Vertical (M1 — Auth end-to-end):
 - **Next.js 15 cookies API:** `cookies()` is now async. Must await.
 - **Inngest local dev:** runs on separate port (8288). `inngest-cli dev` must be running.
 - **shadcn install:** `pnpm dlx shadcn@latest add` — uses `@latest`, not `add` legacy. Old commands fail.
+- **Storefront BA construction:** must go through `createStorefrontAuth(resolveTenantContext)` from `@rp/auth-core/storefront`. Bare `betterAuth(...)` skips the tenant-scoped adapter wrapper (DEL-3 / `docs/specs/storefront-tenant-scoping.md`) — every storefront write would lose `tenant_id` and every read would leak across tenants. The wrapper is unconditional; passing through resolves tenant from `Host` via `next/headers`.
 
 ---
 

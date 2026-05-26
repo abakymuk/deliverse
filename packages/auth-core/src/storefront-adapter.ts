@@ -1,0 +1,212 @@
+/**
+ * Storefront tenant-scoped Drizzle adapter wrapper.
+ *
+ * Wraps a Better-Auth `DBAdapter` so that:
+ *   - `create` for user/session/verification stamps tenant context
+ *     onto the data
+ *   - read + mutation methods for user/verification append a
+ *     `tenantId = ctx.tenantId` predicate to the `where` clause
+ *   - session lookups by `token` and the `account` model pass through
+ *
+ * The transaction method wraps the trx adapter recursively so operations
+ * inside `runWithTransaction` (e.g. BA's `createOAuthUser`) stay scoped.
+ *
+ * Spec: docs/specs/storefront-tenant-scoping.md §5.
+ * ADR: docs/decisions/0010-tenant-scoping-injection.md.
+ *
+ * The caller-supplied `resolveTenantContext` is called once per wrapped
+ * method invocation. It is responsible for its own typed error throwing
+ * (APIError on missing brand subdomain etc); the wrapper just propagates.
+ */
+
+import { APIError, type DBAdapter, type DBTransactionAdapter, type Where } from 'better-auth';
+import { deriveVerificationType } from './storefront-verification-type';
+
+export type StorefrontTenantContext = {
+  tenantId: string;
+  brandId: string;
+};
+
+export type ResolveTenantContext = () => Promise<StorefrontTenantContext>;
+
+const SCOPED_MODELS = new Set(['user', 'verification']);
+
+function tenantPredicate(tenantId: string): Where {
+  return {
+    field: 'tenantId',
+    value: tenantId,
+    operator: 'eq',
+    connector: 'AND',
+  };
+}
+
+function withTenantWhere(where: Where[] | undefined, tenantId: string): Where[] {
+  return where ? [...where, tenantPredicate(tenantId)] : [tenantPredicate(tenantId)];
+}
+
+function wrapMethods(
+  inner: DBTransactionAdapter,
+  resolveTenantContext: ResolveTenantContext,
+): DBTransactionAdapter {
+  return {
+    id: inner.id,
+
+    async create({ model, data, select, forceAllowId }) {
+      if (model === 'user') {
+        const ctx = await resolveTenantContext();
+        return inner.create({
+          model,
+          data: { ...data, tenantId: ctx.tenantId },
+          select,
+          forceAllowId,
+        });
+      }
+      if (model === 'session') {
+        const ctx = await resolveTenantContext();
+        return inner.create({
+          model,
+          data: { ...data, currentBrandId: ctx.brandId },
+          select,
+          forceAllowId,
+        });
+      }
+      if (model === 'verification') {
+        const ctx = await resolveTenantContext();
+        const identifier = (data as { identifier?: string }).identifier;
+        const type = deriveVerificationType(identifier);
+        if (!type) {
+          throw new APIError('BAD_REQUEST', {
+            message: `unknown verification identifier shape — cannot derive verification.type (identifier=${identifier ?? '<missing>'})`,
+            code: 'UNKNOWN_VERIFICATION_TYPE',
+          });
+        }
+        return inner.create({
+          model,
+          data: {
+            ...data,
+            tenantId: ctx.tenantId,
+            brandId: ctx.brandId,
+            type,
+          },
+          select,
+          forceAllowId,
+        });
+      }
+      return inner.create({ model, data, select, forceAllowId });
+    },
+
+    async findOne({ model, where, select, join }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.findOne({
+          model,
+          where: withTenantWhere(where, ctx.tenantId),
+          select,
+          join,
+        });
+      }
+      return inner.findOne({ model, where, select, join });
+    },
+
+    async findMany({ model, where, limit, select, sortBy, offset, join }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.findMany({
+          model,
+          where: withTenantWhere(where, ctx.tenantId),
+          limit,
+          select,
+          sortBy,
+          offset,
+          join,
+        });
+      }
+      return inner.findMany({
+        model,
+        where,
+        limit,
+        select,
+        sortBy,
+        offset,
+        join,
+      });
+    },
+
+    async count({ model, where }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.count({ model, where: withTenantWhere(where, ctx.tenantId) });
+      }
+      return inner.count({ model, where });
+    },
+
+    async update({ model, where, update }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.update({
+          model,
+          where: withTenantWhere(where, ctx.tenantId),
+          update,
+        });
+      }
+      return inner.update({ model, where, update });
+    },
+
+    async updateMany({ model, where, update }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.updateMany({
+          model,
+          where: withTenantWhere(where, ctx.tenantId),
+          update,
+        });
+      }
+      return inner.updateMany({ model, where, update });
+    },
+
+    async delete({ model, where }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.delete({ model, where: withTenantWhere(where, ctx.tenantId) });
+      }
+      return inner.delete({ model, where });
+    },
+
+    async deleteMany({ model, where }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.deleteMany({
+          model,
+          where: withTenantWhere(where, ctx.tenantId),
+        });
+      }
+      return inner.deleteMany({ model, where });
+    },
+
+    async consumeOne({ model, where }) {
+      if (SCOPED_MODELS.has(model)) {
+        const ctx = await resolveTenantContext();
+        return inner.consumeOne({
+          model,
+          where: withTenantWhere(where, ctx.tenantId),
+        });
+      }
+      return inner.consumeOne({ model, where });
+    },
+
+    createSchema: inner.createSchema,
+    options: inner.options,
+  };
+}
+
+export function wrappedStorefrontAdapter(
+  inner: DBAdapter,
+  resolveTenantContext: ResolveTenantContext,
+): DBAdapter {
+  const wrapped = wrapMethods(inner, resolveTenantContext);
+  return {
+    ...wrapped,
+    transaction: async (cb) =>
+      inner.transaction((trx) => cb(wrapMethods(trx, resolveTenantContext))),
+  };
+}
