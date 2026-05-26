@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 /**
  * Storefront auth E2E tests
@@ -38,12 +38,14 @@ test.describe('Storefront Auth — OTP flow', () => {
 });
 
 test.describe('Cross-brand recognition (same tenant)', () => {
-  test('disclosure shown on sibling brand', async () => {
-    // User signs up at pizza-express
-    // Visits burger-heaven (same tenant)
-    // Should see disclosure that account works across brands
-    // TODO: implement after seed data is ready
-    test.skip();
+  test('signup page shows sibling-brand disclosure', async ({ page }) => {
+    // Seed has Hospitality Group + pizza-express + burger-heaven (same tenant).
+    // Visiting pizza-express signup should disclose Burger Heaven as a sibling.
+    // DEL-7 always-on inline disclosure per docs/specs/auth-ui.md §4 decision #1.
+    await page.goto('/signup');
+    await expect(page.getByText(/Pizza Express is part of Hospitality Group/i)).toBeVisible();
+    await expect(page.getByText(/Burger Heaven/)).toBeVisible();
+    await expect(page.getByText(/Your account works at all of them/i)).toBeVisible();
   });
 });
 

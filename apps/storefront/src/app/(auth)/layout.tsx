@@ -1,5 +1,5 @@
-import { headers } from 'next/headers';
 import { getBrandContext } from '@/lib/tenant-resolution';
+import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
 
 export default async function AuthLayout({
