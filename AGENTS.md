@@ -137,11 +137,10 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 Active project: **Phase 1 — Auth Vertical** (Linear, Urgent).
 Active milestone: **M1 — Auth end-to-end**.
-Recently shipped (M1): DEL-5 (storefront OTP email via Inngest → Resend — first real transactional send; `@rp/emails` package filled in with pure handler + thin Inngest wrapper; brand-themed React Email template; package-local resolver with tenant-ownership defense-in-depth check), DEL-4 (email delivery architecture), DEL-3 (storefront tenant-scoped adapter — wraps Drizzle adapter, stamps tenant_id/current_brand_id/verification.type on creates, scopes reads on user + verification).
+Recently shipped (M1): DEL-6 (password reset + email verification emails — 3 stubs not 4, since storefront uses OTP for verification; shared template chrome extracted; discriminated-union events ready for future storefront email-verify variant), DEL-5 (storefront OTP email via Inngest → Resend — first real transactional send; `@rp/emails` package filled in with pure handler + thin Inngest wrapper; brand-themed React Email template; package-local resolver with tenant-ownership defense-in-depth check), DEL-4 (email delivery architecture), DEL-3 (storefront tenant-scoped adapter — wraps Drizzle adapter, stamps tenant_id/current_brand_id/verification.type on creates, scopes reads on user + verification).
 
 Open M1 work:
 - DEL-3a / DEL-12 — Storefront `tenant_end_user_accounts` tenant scoping for OAuth account lookup (Urgent, **blocks DEL-7 OAuth signup**).
-- DEL-6 — password reset + email verify via Resend (Urgent, unblocked by DEL-4 + reuses DEL-5's pattern).
 - DEL-7 — Signup pages + cross-brand disclosure (non-OAuth flows unblocked by DEL-3; OAuth gated on DEL-3a).
 - DEL-8 — Re-enable E2E in CI.
 - DEL-9 — OTP rate limiting (additive).
