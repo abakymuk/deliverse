@@ -3,8 +3,9 @@
 /**
  * Platform login form — email/password + Google OAuth.
  *
- * Modern shadcn React Hook Form + Field pattern. See
- * docs/specs/ui-foundations.md §6 for the canonical shape.
+ * Structured after shadcn login-01 (FieldGroup + single outer Field for
+ * actions + footer description; no "Or continue with" divider). RHF + zod
+ * preserved per docs/specs/ui-foundations.md §6.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -23,7 +24,13 @@ import {
   CardHeader,
   CardTitle,
 } from '@rp/ui/components/card';
-import { Field, FieldError, FieldLabel } from '@rp/ui/components/field';
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@rp/ui/components/field';
 import { Input } from '@rp/ui/components/input';
 
 import { signIn } from '@/lib/auth-client';
@@ -80,96 +87,91 @@ export function LoginForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card>
       <CardHeader>
-        <CardTitle>Welcome back</CardTitle>
-        <CardDescription>Sign in to your platform account</CardDescription>
+        <CardTitle>Login to your account</CardTitle>
+        <CardDescription>
+          Enter your email below to login to your account
+        </CardDescription>
       </CardHeader>
       <CardContent>
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="flex flex-col gap-4"
-          noValidate
-        >
-          <Controller
-            control={control}
-            name="email"
-            render={({ field: rhfField, fieldState }) => (
-              <Field>
-                <FieldLabel htmlFor="email">Email</FieldLabel>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  aria-invalid={fieldState.invalid}
-                  {...rhfField}
-                />
-                {fieldState.invalid && (
-                  <FieldError errors={[fieldState.error]} />
-                )}
-              </Field>
+        <form onSubmit={handleSubmit(onSubmit)} noValidate>
+          <FieldGroup>
+            <Controller
+              control={control}
+              name="email"
+              render={({ field: rhfField, fieldState }) => (
+                <Field>
+                  <FieldLabel htmlFor="email">Email</FieldLabel>
+                  <Input
+                    id="email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="m@example.com"
+                    required
+                    aria-invalid={fieldState.invalid}
+                    {...rhfField}
+                  />
+                  {fieldState.invalid && (
+                    <FieldError errors={[fieldState.error]} />
+                  )}
+                </Field>
+              )}
+            />
+
+            <Controller
+              control={control}
+              name="password"
+              render={({ field: rhfField, fieldState }) => (
+                <Field>
+                  <div className="flex items-center">
+                    <FieldLabel htmlFor="password">Password</FieldLabel>
+                    <Link
+                      href={'/forgot-password' as Route}
+                      className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+                    >
+                      Forgot your password?
+                    </Link>
+                  </div>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="current-password"
+                    required
+                    aria-invalid={fieldState.invalid}
+                    {...rhfField}
+                  />
+                  {fieldState.invalid && (
+                    <FieldError errors={[fieldState.error]} />
+                  )}
+                </Field>
+              )}
+            />
+
+            {errors.root && (
+              <p className="text-destructive text-sm" role="alert">
+                {errors.root.message}
+              </p>
             )}
-          />
 
-          <Controller
-            control={control}
-            name="password"
-            render={({ field: rhfField, fieldState }) => (
-              <Field>
-                <div className="flex items-center justify-between">
-                  <FieldLabel htmlFor="password">Password</FieldLabel>
-                  <Link
-                    href={'/forgot-password' as Route}
-                    className="text-muted-foreground text-sm hover:underline"
-                  >
-                    Forgot password?
-                  </Link>
-                </div>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete="current-password"
-                  aria-invalid={fieldState.invalid}
-                  {...rhfField}
-                />
-                {fieldState.invalid && (
-                  <FieldError errors={[fieldState.error]} />
-                )}
-              </Field>
-            )}
-          />
-
-          {errors.root && (
-            <p className="text-destructive text-sm" role="alert">
-              {errors.root.message}
-            </p>
-          )}
-
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Signing in…' : 'Sign in'}
-          </Button>
+            <Field>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Signing in…' : 'Login'}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={handleGoogleLogin}
+                disabled={googleLoading || isSubmitting}
+              >
+                Login with Google
+              </Button>
+              <FieldDescription className="text-center">
+                Need access? Contact your admin.
+              </FieldDescription>
+            </Field>
+          </FieldGroup>
         </form>
-
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-card text-muted-foreground px-2">
-              Or continue with
-            </span>
-          </div>
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={handleGoogleLogin}
-          disabled={googleLoading || isSubmitting}
-        >
-          Continue with Google
-        </Button>
       </CardContent>
     </Card>
   );
