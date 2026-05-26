@@ -6,9 +6,11 @@
  *   2. Password fallback: email + password → /account
  *   3. Google OAuth
  *
- * Mode switching uses keyed child forms (see docs/specs/ui-foundations.md
- * §8.2) — each child has its own useForm + zodResolver, so RHF re-initializes
- * cleanly on switch without resolver-swap edge cases.
+ * Structured after shadcn login-01 (FieldGroup + single outer Field for
+ * actions + footer; no "Or continue with" divider). Mode toggle lives as a
+ * link-variant button between the primary action and Google OAuth so OTP
+ * stays the visible default. Keyed child forms (one per mode) ensure RHF
+ * re-initializes cleanly on switch.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -27,7 +29,13 @@ import {
   CardHeader,
   CardTitle,
 } from '@rp/ui/components/card';
-import { Field, FieldError, FieldLabel } from '@rp/ui/components/field';
+import {
+  Field,
+  FieldDescription,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from '@rp/ui/components/field';
 import { Input } from '@rp/ui/components/input';
 
 import { emailOtp, signIn } from '@/lib/auth-client';
@@ -47,17 +55,15 @@ type Mode = 'otp' | 'password';
 
 export function LoginForm() {
   const [mode, setMode] = useState<Mode>('otp');
-  const [googleLoading, setGoogleLoading] = useState(false);
   const searchParams = useSearchParams();
   const next = searchParams.get('next') ?? '/account';
 
-  async function handleGoogleLogin() {
-    setGoogleLoading(true);
-    await signIn.social({ provider: 'google', callbackURL: next });
+  function toggleMode() {
+    setMode((m) => (m === 'otp' ? 'password' : 'otp'));
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card>
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
         <CardDescription>
@@ -68,53 +74,28 @@ export function LoginForm() {
       </CardHeader>
       <CardContent>
         {mode === 'otp' ? (
-          <OtpForm key="otp" next={next} />
+          <OtpForm key="otp" next={next} onToggleMode={toggleMode} />
         ) : (
-          <PasswordForm key="password" next={next} />
+          <PasswordForm
+            key="password"
+            next={next}
+            onToggleMode={toggleMode}
+          />
         )}
-
-        <button
-          type="button"
-          onClick={() => setMode(mode === 'otp' ? 'password' : 'otp')}
-          className="text-muted-foreground mt-4 w-full text-sm hover:underline"
-        >
-          {mode === 'otp'
-            ? 'Sign in with password instead'
-            : 'Sign in with a code instead'}
-        </button>
-
-        <div className="relative my-6">
-          <div className="absolute inset-0 flex items-center">
-            <span className="w-full border-t" />
-          </div>
-          <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-card text-muted-foreground px-2">Or</span>
-          </div>
-        </div>
-
-        <Button
-          type="button"
-          variant="outline"
-          className="w-full"
-          onClick={handleGoogleLogin}
-          disabled={googleLoading}
-        >
-          Continue with Google
-        </Button>
-
-        <p className="text-muted-foreground mt-6 text-center text-sm">
-          Don&apos;t have an account?{' '}
-          <Link href={'/signup' as Route} className="underline">
-            Sign up
-          </Link>
-        </p>
       </CardContent>
     </Card>
   );
 }
 
-function OtpForm({ next }: { next: string }) {
+function OtpForm({
+  next,
+  onToggleMode,
+}: {
+  next: string;
+  onToggleMode: () => void;
+}) {
   const router = useRouter();
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const {
     control,
@@ -149,45 +130,76 @@ function OtpForm({ next }: { next: string }) {
     }
   }
 
+  async function handleGoogleLogin() {
+    setGoogleLoading(true);
+    await signIn.social({ provider: 'google', callbackURL: next });
+  }
+
   return (
-    <form
-      onSubmit={handleSubmit(onSubmit)}
-      className="flex flex-col gap-4"
-      noValidate
-    >
-      <Controller
-        control={control}
-        name="email"
-        render={({ field: rhfField, fieldState }) => (
-          <Field>
-            <FieldLabel htmlFor="otp-email">Email</FieldLabel>
-            <Input
-              id="otp-email"
-              type="email"
-              autoComplete="email"
-              aria-invalid={fieldState.invalid}
-              {...rhfField}
-            />
-            {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
-          </Field>
+    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <FieldGroup>
+        <Controller
+          control={control}
+          name="email"
+          render={({ field: rhfField, fieldState }) => (
+            <Field>
+              <FieldLabel htmlFor="otp-email">Email</FieldLabel>
+              <Input
+                id="otp-email"
+                type="email"
+                autoComplete="email"
+                placeholder="m@example.com"
+                required
+                aria-invalid={fieldState.invalid}
+                {...rhfField}
+              />
+              {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+            </Field>
+          )}
+        />
+
+        {errors.root && (
+          <p className="text-destructive text-sm" role="alert">
+            {errors.root.message}
+          </p>
         )}
-      />
 
-      {errors.root && (
-        <p className="text-destructive text-sm" role="alert">
-          {errors.root.message}
-        </p>
-      )}
-
-      <Button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Sending…' : 'Send code'}
-      </Button>
+        <Field>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Sending…' : 'Send code'}
+          </Button>
+          <Button type="button" variant="link" onClick={onToggleMode}>
+            Sign in with password instead
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleGoogleLogin}
+            disabled={googleLoading || isSubmitting}
+          >
+            Continue with Google
+          </Button>
+          <FieldDescription className="text-center">
+            Don&apos;t have an account?{' '}
+            <Link href={'/signup' as Route} className="underline">
+              Sign up
+            </Link>
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
     </form>
   );
 }
 
-function PasswordForm({ next }: { next: string }) {
+function PasswordForm({
+  next,
+  onToggleMode,
+}: {
+  next: string;
+  onToggleMode: () => void;
+}) {
   const router = useRouter();
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const {
     control,
@@ -222,57 +234,90 @@ function PasswordForm({ next }: { next: string }) {
     }
   }
 
+  async function handleGoogleLogin() {
+    setGoogleLoading(true);
+    await signIn.social({ provider: 'google', callbackURL: next });
+  }
+
   return (
-    <form
-      onSubmit={handleSubmit(onSubmit)}
-      className="flex flex-col gap-4"
-      noValidate
-    >
-      <Controller
-        control={control}
-        name="email"
-        render={({ field: rhfField, fieldState }) => (
-          <Field>
-            <FieldLabel htmlFor="pw-email">Email</FieldLabel>
-            <Input
-              id="pw-email"
-              type="email"
-              autoComplete="email"
-              aria-invalid={fieldState.invalid}
-              {...rhfField}
-            />
-            {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
-          </Field>
+    <form onSubmit={handleSubmit(onSubmit)} noValidate>
+      <FieldGroup>
+        <Controller
+          control={control}
+          name="email"
+          render={({ field: rhfField, fieldState }) => (
+            <Field>
+              <FieldLabel htmlFor="pw-email">Email</FieldLabel>
+              <Input
+                id="pw-email"
+                type="email"
+                autoComplete="email"
+                placeholder="m@example.com"
+                required
+                aria-invalid={fieldState.invalid}
+                {...rhfField}
+              />
+              {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+            </Field>
+          )}
+        />
+
+        <Controller
+          control={control}
+          name="password"
+          render={({ field: rhfField, fieldState }) => (
+            <Field>
+              <div className="flex items-center">
+                <FieldLabel htmlFor="pw-password">Password</FieldLabel>
+                <Link
+                  href={'/forgot-password' as Route}
+                  className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
+                >
+                  Forgot your password?
+                </Link>
+              </div>
+              <Input
+                id="pw-password"
+                type="password"
+                autoComplete="current-password"
+                required
+                aria-invalid={fieldState.invalid}
+                {...rhfField}
+              />
+              {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
+            </Field>
+          )}
+        />
+
+        {errors.root && (
+          <p className="text-destructive text-sm" role="alert">
+            {errors.root.message}
+          </p>
         )}
-      />
 
-      <Controller
-        control={control}
-        name="password"
-        render={({ field: rhfField, fieldState }) => (
-          <Field>
-            <FieldLabel htmlFor="pw-password">Password</FieldLabel>
-            <Input
-              id="pw-password"
-              type="password"
-              autoComplete="current-password"
-              aria-invalid={fieldState.invalid}
-              {...rhfField}
-            />
-            {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
-          </Field>
-        )}
-      />
-
-      {errors.root && (
-        <p className="text-destructive text-sm" role="alert">
-          {errors.root.message}
-        </p>
-      )}
-
-      <Button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? 'Signing in…' : 'Sign in'}
-      </Button>
+        <Field>
+          <Button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Signing in…' : 'Login'}
+          </Button>
+          <Button type="button" variant="link" onClick={onToggleMode}>
+            Sign in with a code instead
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleGoogleLogin}
+            disabled={googleLoading || isSubmitting}
+          >
+            Continue with Google
+          </Button>
+          <FieldDescription className="text-center">
+            Don&apos;t have an account?{' '}
+            <Link href={'/signup' as Route} className="underline">
+              Sign up
+            </Link>
+          </FieldDescription>
+        </Field>
+      </FieldGroup>
     </form>
   );
 }

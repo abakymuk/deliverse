@@ -3,8 +3,9 @@
 /**
  * Storefront verify-OTP form — 6-digit code entry via shadcn InputOTP.
  *
- * Modern shadcn React Hook Form + Field pattern. See
- * docs/specs/ui-foundations.md §6 + §8.3.
+ * Structured after shadcn login-01 (FieldGroup wrapper, single outer Field
+ * for actions, no divider). InputOTP slot stays centered inside its Field.
+ * RHF + zod preserved per docs/specs/ui-foundations.md §6.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -22,7 +23,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@rp/ui/components/card';
-import { Field, FieldError } from '@rp/ui/components/field';
+import { Field, FieldError, FieldGroup } from '@rp/ui/components/field';
 import {
   InputOTP,
   InputOTPGroup,
@@ -86,7 +87,7 @@ export function VerifyOtpForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm">
+    <Card>
       <CardHeader className="text-center">
         <CardTitle>Check your email</CardTitle>
         <CardDescription>
@@ -94,59 +95,58 @@ export function VerifyOtpForm() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <form
-          onSubmit={handleSubmit(onSubmit)}
-          className="flex flex-col gap-4"
-          noValidate
-        >
-          <Controller
-            control={control}
-            name="otp"
-            render={({ field: rhfField, fieldState }) => (
-              <Field className="items-center">
-                <InputOTP
-                  maxLength={6}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  aria-invalid={fieldState.invalid}
-                  value={rhfField.value}
-                  onChange={rhfField.onChange}
-                  onBlur={rhfField.onBlur}
-                >
-                  <InputOTPGroup>
-                    <InputOTPSlot index={0} />
-                    <InputOTPSlot index={1} />
-                    <InputOTPSlot index={2} />
-                    <InputOTPSlot index={3} />
-                    <InputOTPSlot index={4} />
-                    <InputOTPSlot index={5} />
-                  </InputOTPGroup>
-                </InputOTP>
-                {fieldState.invalid && (
-                  <FieldError errors={[fieldState.error]} />
-                )}
-              </Field>
+        <form onSubmit={handleSubmit(onSubmit)} noValidate>
+          <FieldGroup>
+            <Controller
+              control={control}
+              name="otp"
+              render={({ field: rhfField, fieldState }) => (
+                <Field className="items-center">
+                  <InputOTP
+                    maxLength={6}
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    aria-invalid={fieldState.invalid}
+                    value={rhfField.value}
+                    onChange={rhfField.onChange}
+                    onBlur={rhfField.onBlur}
+                  >
+                    <InputOTPGroup>
+                      <InputOTPSlot index={0} />
+                      <InputOTPSlot index={1} />
+                      <InputOTPSlot index={2} />
+                      <InputOTPSlot index={3} />
+                      <InputOTPSlot index={4} />
+                      <InputOTPSlot index={5} />
+                    </InputOTPGroup>
+                  </InputOTP>
+                  {fieldState.invalid && (
+                    <FieldError errors={[fieldState.error]} />
+                  )}
+                </Field>
+              )}
+            />
+
+            {errors.root && (
+              <p className="text-destructive text-sm" role="alert">
+                {errors.root.message}
+              </p>
             )}
-          />
 
-          {errors.root && (
-            <p className="text-destructive text-sm" role="alert">
-              {errors.root.message}
-            </p>
-          )}
-
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Verifying…' : 'Verify'}
-          </Button>
-
-          <button
-            type="button"
-            onClick={handleResend}
-            disabled={isSubmitting || resending}
-            className="text-muted-foreground text-sm hover:underline disabled:opacity-50"
-          >
-            {resending ? 'Sending…' : "Didn't get a code? Resend"}
-          </button>
+            <Field>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Verifying…' : 'Verify'}
+              </Button>
+              <Button
+                type="button"
+                variant="link"
+                onClick={handleResend}
+                disabled={isSubmitting || resending}
+              >
+                {resending ? 'Sending…' : "Didn't get a code? Resend"}
+              </Button>
+            </Field>
+          </FieldGroup>
         </form>
       </CardContent>
     </Card>
