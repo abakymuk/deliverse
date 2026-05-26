@@ -17,14 +17,30 @@
  * The leading `.` in the suffix check prevents `evildeliverse.app` from
  * matching `deliverse.app` (which a naive `endsWith` would allow).
  */
+/**
+ * Lowercase + strip optional `<scheme>://` prefix + strip optional `:port`
+ * suffix. Matches `storefront-host.ts:normalizeDomain` — defensive parsing
+ * for `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` that may be set as either
+ * `localhost:3001` (docs) or `http://localhost:3001` (some Doppler configs).
+ */
+function normalizeDomain(s: string): string {
+  let v = s.toLowerCase();
+  const schemeIdx = v.indexOf('://');
+  if (schemeIdx >= 0) v = v.slice(schemeIdx + 3);
+  const portIdx = v.indexOf(':');
+  if (portIdx >= 0) v = v.slice(0, portIdx);
+  const slashIdx = v.indexOf('/');
+  if (slashIdx >= 0) v = v.slice(0, slashIdx);
+  return v;
+}
+
 export function isAllowedStorefrontOrigin(
   host: string | null | undefined,
   baseDomain: string | undefined,
 ): boolean {
   if (!host || !baseDomain) return false;
-  const normalize = (s: string) => s.toLowerCase().split(':')[0];
-  const h = normalize(host);
-  const b = normalize(baseDomain);
+  const h = normalizeDomain(host);
+  const b = normalizeDomain(baseDomain);
   if (!h || !b) return false;
   return h === b || h.endsWith(`.${b}`);
 }

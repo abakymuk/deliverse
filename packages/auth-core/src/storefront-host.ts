@@ -24,15 +24,32 @@ const RESERVED_SUBDOMAINS = new Set(['www', 'admin', 'api', 'app']);
  * Port is stripped from both sides before comparison, matching the
  * `isAllowedStorefrontOrigin` helper in `storefront-origin.ts`.
  */
+/**
+ * Lowercase + strip optional `<scheme>://` prefix + strip optional `:port`
+ * suffix. Tolerates both `localhost:3001` and `http://localhost:3001`
+ * shapes for the env var (docs prescribe the former; the dev Doppler
+ * config historically used the latter — defensive parsing keeps both
+ * working without a Doppler edit).
+ */
+function normalizeDomain(s: string): string {
+  let v = s.toLowerCase();
+  const schemeIdx = v.indexOf('://');
+  if (schemeIdx >= 0) v = v.slice(schemeIdx + 3);
+  const portIdx = v.indexOf(':');
+  if (portIdx >= 0) v = v.slice(0, portIdx);
+  const slashIdx = v.indexOf('/');
+  if (slashIdx >= 0) v = v.slice(0, slashIdx);
+  return v;
+}
+
 export function extractBrandSlug(
   host: string | null | undefined,
   baseDomain: string | undefined,
 ): string | null {
   if (!host || !baseDomain) return null;
 
-  const stripPort = (s: string) => s.toLowerCase().split(':')[0] ?? '';
-  const h = stripPort(host);
-  const b = stripPort(baseDomain);
+  const h = normalizeDomain(host);
+  const b = normalizeDomain(baseDomain);
   if (!h || !b) return null;
 
   if (h === b) return null;
