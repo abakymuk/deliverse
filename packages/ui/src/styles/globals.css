@@ -1,5 +1,23 @@
 @import "tailwindcss";
 
+/*
+ * Tailwind v4 source globs — required for monorepo content scanning.
+ *
+ * v4's automatic content detection works from the CSS file's location but
+ * does NOT reliably traverse across workspace packages in production builds.
+ * Without these directives, utility classes used in `apps/*` get pruned from
+ * the prod bundle and pages render unstyled (only theme tokens applied via
+ * `body` / `*` selectors below survive).
+ *
+ * Globs are relative to this file (`packages/ui/src/styles/globals.css`).
+ * - First glob: this package's own shadcn components.
+ * - Second glob: every consuming app's source tree.
+ *
+ * If we ever move the source root or rename `@rp/ui`, update both globs.
+ */
+@source "../components/**/*.{ts,tsx}";
+@source "../../../../apps/*/src/**/*.{ts,tsx}";
+
 @theme {
   --color-background: hsl(0 0% 100%);
   --color-foreground: hsl(0 0% 3.9%);
