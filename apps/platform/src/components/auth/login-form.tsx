@@ -9,21 +9,15 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import type { Route } from 'next';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 import { Button } from '@rp/ui/components/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@rp/ui/components/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import {
   Field,
   FieldDescription,
@@ -90,9 +84,7 @@ export function LoginForm() {
     <Card>
       <CardHeader>
         <CardTitle>Login to your account</CardTitle>
-        <CardDescription>
-          Enter your email below to login to your account
-        </CardDescription>
+        <CardDescription>Enter your email below to login to your account</CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate>
@@ -112,9 +104,7 @@ export function LoginForm() {
                     aria-invalid={fieldState.invalid}
                     {...rhfField}
                   />
-                  {fieldState.invalid && (
-                    <FieldError errors={[fieldState.error]} />
-                  )}
+                  {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}
             />
@@ -141,9 +131,7 @@ export function LoginForm() {
                     aria-invalid={fieldState.invalid}
                     {...rhfField}
                   />
-                  {fieldState.invalid && (
-                    <FieldError errors={[fieldState.error]} />
-                  )}
+                  {fieldState.invalid && <FieldError errors={[fieldState.error]} />}
                 </Field>
               )}
             />

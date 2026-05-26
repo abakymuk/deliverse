@@ -14,21 +14,15 @@
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useRouter, useSearchParams } from 'next/navigation';
-import Link from 'next/link';
 import type { Route } from 'next';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 import { Button } from '@rp/ui/components/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@rp/ui/components/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import {
   Field,
   FieldDescription,
@@ -67,20 +61,14 @@ export function LoginForm() {
       <CardHeader>
         <CardTitle>Sign in</CardTitle>
         <CardDescription>
-          {mode === 'otp'
-            ? "We'll email you a 6-digit code"
-            : 'Use your email and password'}
+          {mode === 'otp' ? "We'll email you a 6-digit code" : 'Use your email and password'}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {mode === 'otp' ? (
           <OtpForm key="otp" next={next} onToggleMode={toggleMode} />
         ) : (
-          <PasswordForm
-            key="password"
-            next={next}
-            onToggleMode={toggleMode}
-          />
+          <PasswordForm key="password" next={next} onToggleMode={toggleMode} />
         )}
       </CardContent>
     </Card>
