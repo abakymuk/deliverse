@@ -65,9 +65,9 @@ This is a **decision issue — DEL-4 ships no app code**. Implementation lands i
 
 - `packages/emails/`: `inngest`, `resend`, `react-email` (v6 unified), `react`, `zod`, `@rp/db` (workspace).
 - `apps/platform`: `inngest` (same version), for triggering events + hosting `/api/inngest`.
-- `apps/storefront`: `inngest` (same version), for triggering events only.
+- ~~`apps/storefront`: `inngest` (same version), for triggering events only.~~ **CORRECTED in DEL-5** — auth-core is the only sender, the storefront app inherits the `inngest` symbol via `@rp/emails/inngest` re-export. See [ADR-0011 §Surprise #4](./0011-emails-install-diff.md).
 
-The actual install in DEL-5 may reveal subtleties (peer deps, version constraints) that override this list — when that happens, this ADR is updated to match reality, mirroring how ADR-0008 was written *after* the shadcn CLI diff.
+> **Update from [DEL-5 install diff](./0011-emails-install-diff.md):** the actual `pnpm install` resolution was richer than this list. Notably: `react-email@6.3.3` IS unified as anticipated (the plan's "split bug" prediction was wrong); `@react-email/render` is added explicit (peer of `resend`); `react-dom` is required (peer of `react-email` itself, separate from `@react-email/render`'s own SSR); `drizzle-orm` added (resolver uses `eq`/`and`/`isNull`); resolved majors are `inngest@^4.4.0` (not `^3.x`), `resend@^6.12.4` (not `^5.x`). ADR-0011 has the complete corrected dep set + rationale.
 
 ## References
 

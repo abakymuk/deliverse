@@ -61,7 +61,7 @@ DEL-5/DEL-6 must hit each callback signature verbatim. These are the contract.
 | `emailAndPassword.sendResetPassword` | storefront | `async ({ user, url }) => …` | `email.password_reset.requested` with `instance: 'storefront'` (carries `tenantId` + `brandSlug` from a request-scoped resolver — DEL-3's surface) |
 | `emailOTP.sendVerificationOTP` | storefront | `async ({ email, otp, type }) => …` where `type ∈ { 'otp_login', 'email_verify', 'password_reset' }` | `email.otp.requested` (storefront-only event; always carries `tenantId` + `brandSlug`) |
 
-The current stubs at [`platform.ts:91-101`](../../packages/auth-core/src/platform.ts) and [`storefront.ts:117-119, 205-207`](../../packages/auth-core/src/storefront.ts) stay as `console.log` until DEL-5/DEL-6 swap the body for `inngest.send(...)`.
+The platform stubs at [`platform.ts:91-101`](../../packages/auth-core/src/platform.ts) and the storefront `sendResetPassword` stub at [`storefront.ts:131-133`](../../packages/auth-core/src/storefront.ts) stay as `console.log` until DEL-6 swaps the body for `inngest.send(...)`. The storefront `sendVerificationOTP` stub was replaced by DEL-5 — see [`docs/specs/otp-email.md`](./otp-email.md) for the implementation reference.
 
 ## 6. Inngest event schemas
 

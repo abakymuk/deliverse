@@ -95,3 +95,7 @@ Pragmatic note: if a future need pulls the resolver into `@rp/auth-core` directl
 - `node_modules/@better-auth/core@1.6.11/dist/db/adapter/types.d.mts:362-453` — `DBAdapter` interface.
 - `node_modules/better-auth@1.6.11/dist/plugins/email-otp/utils.mjs:4-7` — `toOTPIdentifier` shape.
 - `node_modules/better-auth@1.6.11/dist/api/routes/password.mjs:66-68` — `reset-password:${token}` identifier.
+
+## Amendments
+
+**2026-05-26 — [DEL-5](https://linear.app/oveglobal/issue/DEL-5):** extended `StorefrontTenantContext` from `{ tenantId, brandId }` to `{ tenantId, brandId, brandSlug }`. The DEL-5 storefront OTP callback needs the brand subdomain slug (not the id) to compose the `email.otp.requested` Inngest event payload, and the closure already has `resolveTenantContext` in scope. Slug is read off `BrandContext.brand.slug` (already resolved by `resolveBrandBySlug`) with zero extra DB calls. Adapter wrapper behavior is unchanged — it still scopes by `tenantId`/`brandId` only; `brandSlug` is consumer-only. Additive non-breaking type change.
