@@ -49,7 +49,7 @@ Everything else mirrors DEL-4's spec verbatim.
 | # | Decision | Rationale | Source |
 |---|---|---|---|
 | 1 | **OTP event only.** DEL-5 ships `email.otp.requested` + its handler + its template. The other two events (`email.password_reset.requested`, `email.email_verification.requested`) are deferred to DEL-6. | Per DEL-4 §9 "DEL-5 creates the first OTP slice (...); DEL-6 adds the two remaining flows." Smallest reviewable PR. | DEL-4 spec §9 |
-| 2 | **React Email v6 dep split is real.** Install both `react-email` (CLI/preview) and `@react-email/components` (runtime imports) and `@react-email/render` (Resend SDK uses internally). The "unified single package" framing in ADR-0009 doesn't match what `pnpm install` actually resolves; templates `import { Html, Head, Body, ... } from '@react-email/components'`, **not** from `'react-email'`. | Documented react-email v6.0.0 packaging bug — scaffolded `import from 'react-email'` doesn't resolve. ADR-0011 captures the install reality. | [react-email#3414](https://github.com/resend/react-email/issues/3414) |
+| 2 | **React Email v6 IS unified — plan's "split bug" prediction was wrong.** Install `react-email` (CLI + components + render API, all in one) plus `@react-email/render` explicit (Resend SDK peer-deps it; arrives transitively, kept top-level for grep) plus `react-dom` (peer of `react-email` itself). Templates `import { Html, Head, Body, ... } from 'react-email'`. ADR-0011 captures the corrected install reality. | `react-email@6.3.3`'s `dist/index.mjs` re-exports every component AND `export * from '@react-email/render'`. The plan's feared bug [react-email#3414](https://github.com/resend/react-email/issues/3414) is either fixed or never affected the imports we use. NPM marks `@react-email/components@1.0.12` deprecated. | install diff verified post-`pnpm install` |
 | 3 | **Pure-function handler + thin Inngest wrapper.** The business logic (parse → resolve brand → render → send) lives in `packages/emails/src/handlers/otp-requested.ts` as `handleOtpRequested(data)`. The Inngest function in `packages/emails/src/inngest/otp.ts` is a one-line wrapper: `step.run('send', () => handleOtpRequested(event.data))`. | The pure function is unit-testable without touching Inngest SDK internals. Tests stay stable across `inngest` SDK upgrades. | Plan-review feedback |
 | 4 | **Resend wrapper dev no-op logs `{ to, subject }` only — no body preview.** The OTP template's body literally contains the 6-digit code; any preview risks leaking it regardless of caller-side `otp: '***'` redaction. | DEL-4 spec §8 left the redaction surface to the caller. Moving it wrapper-side closes the leak class entirely; future templates can never accidentally widen it. | Plan-review feedback; ADR-0009 decision #10 |
 | 5 | **`brandSlug` plumbing — extend `StorefrontTenantContext`.** DEL-3 shipped `ResolveTenantContext: () => Promise<{ tenantId, brandId }>`. The OTP callback needs `brandSlug` for the Inngest event payload. We extend the context to `{ tenantId, brandId, brandSlug }`. Additive — the adapter wrapper ignores the new field. | The alternative (sibling `resolveEmailContext` callback) would double the resolver plumbing per request for zero benefit. The slug is already on `BrandContext.brand.slug` from `resolveBrandBySlug` ([`packages/auth-core/src/storefront-tenant-resolver.ts:20`](../../packages/auth-core/src/storefront-tenant-resolver.ts)). | See §7 |
@@ -211,14 +211,12 @@ Thrown errors propagate up through `handleOtpRequested` → Inngest's default re
 
 ## 9. Install diff (captured in [ADR-0011](../decisions/0011-emails-install-diff.md))
 
-The DEL-4 ADR anticipated `inngest`, `resend`, `react-email`, `react`, `zod`, `@rp/db` for the emails package, and `inngest` for both apps. Actual diff in DEL-5:
+The DEL-4 ADR anticipated `inngest`, `resend`, `react-email`, `react`, `zod`, `@rp/db` for the emails package, and `inngest` for both apps. Actual diff in DEL-5 ([captured in ADR-0011](../decisions/0011-emails-install-diff.md)):
 
-- **`packages/emails/`**: `inngest`, `resend`, `react-email`, **`@react-email/components`** (new — runtime imports), **`@react-email/render`** (new — Resend SDK uses internally), `react`, `zod`, `@rp/db`. Plus `vitest` + `@types/react` (dev). `react-dom` is **not** installed unless `pnpm install` reports it as an unmet peer (`@react-email/render` ships its own SSR).
-- **`apps/platform/`**: `inngest` (for `serve` from `inngest/next`) + **`@rp/emails: workspace:*`** (the route imports `inngest` + `functions` from `@rp/emails/inngest`).
+- **`packages/emails/`**: `inngest@^4.4.0`, `resend@^6.12.4`, `react-email@^6.3.3` (unified — components + render in one), `@react-email/render@^2.0.8` (peer of resend; kept top-level for grep), `react@^19.2.6`, **`react-dom@^19.2.6`** (peer of `react-email` itself, added when install diff surfaced the peer-dep), `zod@^4` (resolves 4.4.3), `@rp/db: workspace:*`. Plus dev: `vitest@^2.1.0`, `@types/react@^19.2.15`, `@types/react-dom@^19.2.3`. **NOT installed:** `@react-email/components` (redundant with v6 unified `react-email`; NPM marks it deprecated).
+- **`apps/platform/`**: `inngest@^4.4.0` (for `serve` from `inngest/next`) + **`@rp/emails: workspace:*`** (the route imports `inngest` + `functions` from `@rp/emails/inngest`).
 - **`apps/storefront/`**: nothing. All `inngest.send()` calls flow through `@rp/auth-core` → `@rp/emails/inngest`.
 - **`packages/auth-core/`**: **`@rp/emails: workspace:*`** (the factory imports the inngest client from `@rp/emails/inngest`). No direct `inngest` declaration — symbol comes through the re-export.
-
-ADR-0011 records the actual resolved versions and the `apps/storefront` correction relative to ADR-0009's anticipated-dep list.
 
 ## 10. Resend client wrapper (DEL-4 spec §8, restated)
 
@@ -286,7 +284,7 @@ doppler run -- pnpm dev
 ### New
 
 - `docs/specs/otp-email.md` — this file.
-- `docs/decisions/0011-emails-install-diff.md` — captures install diff + react-email v6 split + storefront-app dep correction.
+- `docs/decisions/0011-emails-install-diff.md` — captures install diff: react-email v6 IS unified (plan's "split bug" prediction was wrong), `react-dom` added (peer of `react-email`), `@react-email/components` dropped (redundant + deprecated), storefront-app dep correction, actual resolved majors (inngest v4, resend v6).
 - `packages/emails/src/inngest/client.ts` — `new Inngest({ id: 'rp-emails' })`.
 - `packages/emails/src/events.ts` — Zod schema (§5).
 - `packages/emails/src/client.ts` — Resend wrapper (§10).
@@ -294,7 +292,7 @@ doppler run -- pnpm dev
 - `packages/emails/src/handlers/otp-requested.ts` — pure handler (§6).
 - `packages/emails/src/inngest/otp.ts` — thin Inngest wrapper (§6).
 - `packages/emails/src/inngest/index.ts` — `export const functions = [otpRequestedHandler]; export { inngest } from './client'`.
-- `packages/emails/src/templates/otp.tsx` — React Email template, imports from `@react-email/components`.
+- `packages/emails/src/templates/otp.tsx` — React Email template, imports `{ Html, Head, Body, Container, Section, Text, Img }` from `'react-email'` (v6 unified).
 - `packages/emails/__tests__/otp.test.ts` — Vitest unit tests.
 - `apps/platform/src/app/api/inngest/route.ts` — Next.js App Router route with `serve({ client, functions })`. `export const dynamic = 'force-dynamic'` + `export const maxDuration = 300`. No `runtime = 'edge'` (postgres is Node-only).
 
@@ -310,7 +308,7 @@ doppler run -- pnpm dev
 - `pnpm-lock.yaml` — regenerated.
 - `AGENTS.md` — move DEL-5 to "Recently shipped"; add Inngest-route gotcha.
 - `docs/specs/email-delivery.md` — strike "stays as `console.log`" reference in §5; link to this spec.
-- `docs/decisions/0009-emails-package-shape.md` — amend "Anticipated deps" with the react-email v6 reality + storefront-app correction; cross-link ADR-0011.
+- `docs/decisions/0009-emails-package-shape.md` — amend "Anticipated deps" with the storefront-app correction (no direct `inngest` dep there) + add a cross-link to ADR-0011 for the actual resolved versions.
 - `docs/specs/storefront-tenant-scoping.md` — amend §5.3 to include `brandSlug` in the context shape.
 - `docs/decisions/0010-tenant-scoping-injection.md` — append an "Amendments" section noting DEL-5's `brandSlug` addition.
 
@@ -328,7 +326,7 @@ doppler run -- pnpm dev
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| `@react-email/components` install introduces an unforeseen peer-dep cascade | M | L | ADR-0011 captures the resolved set; if cascade is large, revisit in a follow-up |
+| React Email v6 transitively ships ~20 deprecated `@react-email/<component>` subpackages | confirmed | L | NPM warns at install time; no runtime impact. Documented in ADR-0011 §Surprise #6 so next maintainer doesn't chase it. |
 | OTP plaintext sits in Inngest event store for ~24h retention | confirmed | L | Accepted in ADR-0009 decision #10; revisit if Inngest retention becomes a concern |
 | `dynamic = 'force-dynamic'` missing on `/api/inngest` route → static optimization → missed invocations | L | H | AGENTS.md gotcha added in commit 5; route file ships with the export from day 1 |
 | `runtime = 'edge'` on the route would break (postgres is Node-only) | L | H | Spec explicitly forbids; reviewer must catch |
@@ -342,4 +340,5 @@ doppler run -- pnpm dev
 | 2026-05-26 | Resend wrapper dev no-op logs `{ to, subject }` only (no body preview) | Plan-review feedback — moves OTP-leak prevention from caller-side to wrapper-side |
 | 2026-05-26 | Extend `StorefrontTenantContext` with `brandSlug` instead of adding a sibling resolver | Single resolver per request; additive non-breaking type change; slug already on `BrandContext.brand` |
 | 2026-05-26 | `apps/storefront` does NOT get a direct `inngest` dep | Auth-core is the only sender; storefront inherits via re-export. Corrects ADR-0009 anticipated-dep |
-| 2026-05-26 | `react-dom` not installed unless `pnpm install` reports an unmet peer | `@react-email/render` ships its own SSR; ADR-0011 records the actual resolved set if differs |
+| 2026-05-26 | `react-dom@^19.2.6` installed (peer of `react-email@6.3.3`) | Install diff surfaced the peer-dep; ADR-0011 §Surprise #3 records why `@react-email/render`'s own SSR doesn't substitute |
+| 2026-05-26 | `@react-email/components` dropped from install (plan's "v6 split bug" prediction was wrong) | `react-email@6.3.3` re-exports all components + render API; NPM marks `@react-email/components@1.0.12` deprecated. ADR-0011 §Surprise #1 |
