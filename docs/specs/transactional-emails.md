@@ -240,11 +240,45 @@ pnpm dlx inngest-cli@latest dev
 doppler run --config dev -- env -u INNGEST_EVENT_KEY -u INNGEST_SIGNING_KEY INNGEST_DEV=1 pnpm dev
 ```
 
+**No clickable UI for these flows yet.** Platform has `/login` (DEL-2) and storefront has `/login` + `/verify-otp` (DEL-3); the `/forgot-password`, `/reset-password`, `/signup`, and `/verify-email` pages are scoped to **DEL-7**. Until DEL-7 ships, drive the smoke via BA API endpoints directly with `curl`. Browser navigation to `/forgot-password` returns 404 by design.
+
 For each flow, confirm: event fires with the right shape in Inngest dev UI (port 8288); handler runs green; platform terminal logs `[DEV] would send: { to, subject }` with correct subject and **no `url` in the log line** (same redaction discipline as the OTP path).
 
-1. **Platform password reset:** trigger via `admin.localhost:3000` login → "Forgot password?" → enter `admin@test.local` (seeded). Subject: `"Reset your Deliverse password"`. Event `data.instance === 'platform'`.
-2. **Platform email verification:** trigger via direct BA API call. Endpoint confirmed from installed source (§2): `POST /api/auth/send-verification-email` with `{email}` body. Subject: `"Verify your Deliverse email"`. Event `data.instance === 'platform'`.
-3. **Storefront password reset:** at `pizza-express.localhost:3001/login` → "Forgot password?" → enter the same email. Subject: `"Reset your password for Pizza Express"`. Event `data.instance === 'storefront'` with `tenantId` + `brandSlug = 'pizza-express'`.
+1. **Platform password reset** — endpoint confirmed from installed source (§2): `POST /api/auth/request-password-reset` (NOT `/forget-password`; that's a common BA mis-recollection — `password.mjs:20`). BA returns 200 silently if the user doesn't exist (enumeration protection), so use a seeded user like `admin@test.local`. Subject: `"Reset your Deliverse password"`. Event `data.instance === 'platform'`.
+
+   ```bash
+   curl -X POST http://localhost:3000/api/auth/request-password-reset \
+     -H 'Content-Type: application/json' \
+     -H 'Origin: http://localhost:3000' \
+     -d '{"email":"admin@test.local","redirectTo":"/dashboard"}'
+   ```
+
+2. **Platform email verification** — endpoint `POST /api/auth/send-verification-email` (`email-verification.mjs:36`). BA no-ops if the user is already verified (`emailVerified: true`), so create a fresh user first via `POST /api/auth/sign-up/email` — `emailVerification.sendOnSignUp: true` on platform BA then triggers the verify callback automatically. Subject: `"Verify your Deliverse email"`. Event `data.instance === 'platform'`.
+
+   ```bash
+   curl -X POST http://localhost:3000/api/auth/sign-up/email \
+     -H 'Content-Type: application/json' \
+     -H 'Origin: http://localhost:3000' \
+     -d '{"email":"smoke-verify@example.com","password":"SmokeVerifyPass-12","name":"Smoke Verify"}'
+   ```
+
+3. **Storefront password reset** — same BA endpoint, hit on a brand subdomain. Same enumeration-protection behavior, so create a storefront end-user first via `POST /api/auth/sign-up/email` against the subdomain (storefront has `autoSignIn: true`, no verification gate). Subject: `"Reset your password for Pizza Express"`. Event `data.instance === 'storefront'` with `tenantId` + `brandSlug = 'pizza-express'`.
+
+   ```bash
+   # 1. Sign up
+   curl -X POST http://pizza-express.localhost:3001/api/auth/sign-up/email \
+     --resolve pizza-express.localhost:3001:127.0.0.1 \
+     -H 'Content-Type: application/json' \
+     -H 'Origin: http://pizza-express.localhost:3001' \
+     -d '{"email":"smoke-reset@example.com","password":"SmokeResetPass-12","name":"Smoke Reset"}'
+
+   # 2. Reset
+   curl -X POST http://pizza-express.localhost:3001/api/auth/request-password-reset \
+     --resolve pizza-express.localhost:3001:127.0.0.1 \
+     -H 'Content-Type: application/json' \
+     -H 'Origin: http://pizza-express.localhost:3001' \
+     -d '{"email":"smoke-reset@example.com","redirectTo":"/"}'
+   ```
 
 ### 9c. DEL-6 Linear AC mapping (3-stub reality)
 
@@ -254,7 +288,7 @@ For each flow, confirm: event fires with the right shape in Inngest dev UI (port
 | #2 BA stubs replaced with Inngest events | §8 (3 stubs; AC text should be edited post-merge) |
 | #3 Password-reset templates (platform neutral + storefront brand-themed) | §7 + Vitest |
 | #4 Email-verification template (platform-only) | §7 + Vitest; AC text should be edited to drop the "storefront, brand-themed" half |
-| #5 Integration tests both flows both apps | §9a + §9b (3 flows, not 4) |
+| #5 Integration tests both flows both apps | §9a unit tests + §9b API-driven curl smoke (3 flows, not 4). **Clickable browser UI for forgot-password / verify-email is DEL-7's scope** — DEL-6 proves the email pipeline; DEL-7 puts pages in front of it. |
 | #6 Auth-spec §6 AC#3 + signup verification achievable | True after this ships |
 
 ## 10. Files touched

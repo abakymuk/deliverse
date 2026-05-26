@@ -141,7 +141,7 @@ Recently shipped (M1): DEL-6 (password reset + email verification emails — 3 s
 
 Open M1 work:
 - DEL-3a / DEL-12 — Storefront `tenant_end_user_accounts` tenant scoping for OAuth account lookup (Urgent, **blocks DEL-7 OAuth signup**).
-- DEL-7 — Signup pages + cross-brand disclosure (non-OAuth flows unblocked by DEL-3; OAuth gated on DEL-3a).
+- DEL-7 — Signup pages + cross-brand disclosure + the full clickable auth UX (signup, forgot-password, reset-password, verify-email pages on both apps — DEL-6 proved the email pipeline behind these, but the routes don't exist yet, so browser navigation to `/forgot-password` etc. 404s by design until DEL-7 ships). Non-OAuth flows unblocked by DEL-3; OAuth gated on DEL-3a.
 - DEL-8 — Re-enable E2E in CI.
 - DEL-9 — OTP rate limiting (additive).
 
