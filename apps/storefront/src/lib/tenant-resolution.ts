@@ -13,9 +13,9 @@
  * Cached per-request via React `cache()` (server components only).
  */
 
+import { type Brand, type Tenant, brands, db, tenants } from '@rp/db';
+import { and, eq, isNull } from 'drizzle-orm';
 import { cache } from 'react';
-import { eq, and, isNull } from 'drizzle-orm';
-import { db, brands, tenants, type Brand, type Tenant } from '@rp/db';
 
 export type BrandContext = {
   brand: Brand;
@@ -32,6 +32,24 @@ export type BrandContext = {
  *
  * Uses NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN to determine the base.
  */
+/**
+ * Lowercase + strip optional `<scheme>://` prefix + strip optional `:port`
+ * suffix. Tolerates both `localhost:3001` and `http://localhost:3001`
+ * shapes for the env var (docs prescribe the former; the dev Doppler
+ * config historically used the latter — defensive parsing keeps both
+ * working without a Doppler edit).
+ */
+function normalizeDomain(s: string): string {
+  let v = s.toLowerCase();
+  const schemeIdx = v.indexOf('://');
+  if (schemeIdx >= 0) v = v.slice(schemeIdx + 3);
+  const portIdx = v.indexOf(':');
+  if (portIdx >= 0) v = v.slice(0, portIdx);
+  const slashIdx = v.indexOf('/');
+  if (slashIdx >= 0) v = v.slice(0, slashIdx);
+  return v;
+}
+
 export function extractBrandSlug(host: string | null): string | null {
   if (!host) return null;
 
@@ -40,9 +58,8 @@ export function extractBrandSlug(host: string | null): string | null {
     throw new Error('NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN not set');
   }
 
-  // Strip port (for local dev like localhost:3001)
-  const [hostWithoutPort = ''] = host.split(':');
-  const [baseWithoutPort = ''] = baseDomain.split(':');
+  const hostWithoutPort = normalizeDomain(host);
+  const baseWithoutPort = normalizeDomain(baseDomain);
 
   if (hostWithoutPort === baseWithoutPort) {
     return null; // Root domain, no brand
@@ -70,9 +87,7 @@ export function extractBrandSlug(host: string | null): string | null {
  * Resolve brand + tenant from a slug.
  * Cached per request — multiple components can call this without DB hit.
  */
-export const getBrandContext = cache(async (
-  brandSlug: string
-): Promise<BrandContext | null> => {
+export const getBrandContext = cache(async (brandSlug: string): Promise<BrandContext | null> => {
   const result = await db
     .select({
       brand: brands,
@@ -86,8 +101,8 @@ export const getBrandContext = cache(async (
         isNull(brands.deletedAt),
         isNull(tenants.deletedAt),
         eq(tenants.status, 'active'),
-        eq(brands.isActive, true)
-      )
+        eq(brands.isActive, true),
+      ),
     )
     .limit(1);
 
