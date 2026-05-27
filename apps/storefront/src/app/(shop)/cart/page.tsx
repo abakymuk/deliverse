@@ -38,7 +38,7 @@ export default async function CartPage() {
 
       {cart ? (
         <div className="mt-8">
-          <CartSummary cart={cart} currentPath="/cart" />
+          <CartSummary cart={cart} currentPath="/cart" showCheckoutLink />
         </div>
       ) : (
         <div className="mt-8 rounded border border-dashed border-[var(--color-border)] p-8 text-center">

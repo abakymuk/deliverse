@@ -8,6 +8,10 @@ import {
   tenants,
 } from '@rp/db/schema';
 import { and, desc, eq, isNull, like } from 'drizzle-orm';
+// DEL-25 PR 25c: Inngest OTP poller extracted to a non-.spec.ts helper
+// so food-hall.spec.ts can reuse it without making Playwright collect +
+// execute this spec's tests in the consumer's worker.
+import { pollInngestDevForOtp } from './helpers/inngest';
 
 /**
  * DEL-20 / DEL-22 / DEL-23 — Storefront-aware host resolution + tenant-host auth.
@@ -45,68 +49,8 @@ const OOMI_STOREFRONT_SLUG = 'oomi-kitchen-test';
 const RESERVED_SUBDOMAIN = 'admin';
 const UNKNOWN_SUBDOMAIN = 'nonexistent';
 
-const INNGEST_DEV_URL = 'http://localhost:8288/v1/events';
-
 function urlFor(slug: string, path: string): string {
   return `http://${slug}.localhost:${STOREFRONT_PORT}${path}`;
-}
-
-/**
- * Result of polling Inngest dev for an OTP event.
- *
- * `unreachable` — Inngest dev not running on :8288 (e.g., CI without
- *   `inngest-cli dev`). Caller should `test.skip()`.
- * `timeout` — Inngest reachable but matching event never appeared. Caller
- *   should THROW — signals a real regression in the BA `sendVerificationOTP`
- *   callback or the Inngest emit path.
- * `found` — plaintext OTP extracted from the event payload.
- */
-type OtpPollResult =
-  | { status: 'found'; otp: string }
-  | { status: 'unreachable' }
-  | { status: 'timeout' };
-
-/**
- * Poll Inngest dev tools for the latest `email.otp.requested` event whose
- * `data.email` matches `email`.
- *
- * BA stores OTPs hashed (`storeOTP: 'hashed'` in storefront.ts), so the
- * plaintext lives only in the Inngest event payload. Per-memory Inngest
- * indexing lag is 10-30s; default deadline 30s.
- *
- * Spec: docs/specs/verification-brand-optional.md (DEL-23).
- */
-async function pollInngestDevForOtp(
-  email: string,
-  deadlineMs = 30_000,
-): Promise<OtpPollResult> {
-  // Probe once to distinguish unreachable from timeout.
-  try {
-    const probe = await fetch(`${INNGEST_DEV_URL}?event=email.otp.requested&limit=1`);
-    if (!probe.ok) return { status: 'unreachable' };
-  } catch {
-    return { status: 'unreachable' };
-  }
-
-  const deadline = Date.now() + deadlineMs;
-  while (Date.now() < deadline) {
-    try {
-      const res = await fetch(`${INNGEST_DEV_URL}?event=email.otp.requested&limit=20`);
-      if (!res.ok) return { status: 'unreachable' };
-      const json = (await res.json()) as {
-        data?: Array<{ data?: { email?: string; otp?: string } }>;
-      };
-      const match = json.data?.find((e) => e.data?.email === email);
-      if (match?.data?.otp) return { status: 'found', otp: match.data.otp };
-    } catch {
-      // Network or JSON parse hiccup during polling — treat as unreachable,
-      // do NOT crash the test. Probe above confirmed initial reachability;
-      // this catches transient failures.
-      return { status: 'unreachable' };
-    }
-    await new Promise((r) => setTimeout(r, 2000));
-  }
-  return { status: 'timeout' };
 }
 
 // Serial: shared beforeAll/afterAll fixture (OOMI Kitchen Test tenant + storefront).
