@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./platform": "./src/platform.ts",
+    "./safe-next-path": "./src/safe-next-path.ts",
     "./storefront": "./src/storefront.ts",
     "./storefront-adapter": "./src/storefront-adapter.ts",
     "./storefront-host": "./src/storefront-host.ts",

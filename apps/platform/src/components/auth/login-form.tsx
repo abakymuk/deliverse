@@ -16,6 +16,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { Button } from '@rp/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import {
@@ -38,7 +39,7 @@ type LoginValues = z.infer<typeof loginSchema>;
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') ?? '/dashboard';
+  const next = safeNextPath(searchParams.get('next'), '/dashboard');
 
   const [googleLoading, setGoogleLoading] = useState(false);
 
@@ -57,7 +58,6 @@ export function LoginForm() {
       const result = await signIn.email({
         email: values.email,
         password: values.password,
-        callbackURL: next,
       });
 
       if (result.error) {
