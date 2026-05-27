@@ -211,6 +211,13 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
         storeOTP: 'hashed',
         otpLength: 6,
         expiresIn: 60 * 10,
+        // DEL-9: 5 failed verify attempts triggers BA's TOO_MANY_ATTEMPTS
+        // path (deletes the verification row, throws FORBIDDEN). Our wrapped
+        // adapter observes the value-encoded attempts counter on
+        // verification.update and inserts a tenant_otp_lockouts row BEFORE
+        // BA's delete, so the 15-min cooldown survives the row's lifecycle.
+        // See packages/auth-core/src/rate-limit.ts + storefront-adapter.ts.
+        allowedAttempts: 5,
         disableSignUp: false,
         sendVerificationOTP: async ({ email, otp, type }) => {
           // BA's emailOTP plugin uses hyphenated enum values

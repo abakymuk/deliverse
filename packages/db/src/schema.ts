@@ -645,8 +645,19 @@ export const tenantEndUserVerifications = pgTable('tenant_end_user_verifications
   // Type of verification — useful for analytics and security audit
   type: verificationTypeEnum('type').notNull(),
 
-  // Failed attempts counter (for brute-force lockout)
+  // Failed attempts counter. NOTE (DEL-9): kept for legacy/observability,
+  // but Better-Auth 1.6.11 actually encodes attempts inside `value` as
+  // `${otp_hash}:${N}` (see node_modules/.../email-otp/routes.mjs:243-251).
+  // The rate limiter parses attempts from `value`, not from this column.
   attempts: integer('attempts').notNull().default(0),
+
+  // DEL-9: timestamp of the most recent request to send this OTP, used by
+  // checkOtpRequest to enforce the 60s-per-request rate limit. Equal to
+  // created_at in v1 (BA creates a new row per send), but kept as a
+  // dedicated column to stay accurate if BA ever switches to row reuse.
+  lastRequestedAt: timestamp('last_requested_at', { withTimezone: true })
+    .notNull()
+    .defaultNow(),
 
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
 
@@ -658,6 +669,54 @@ export const tenantEndUserVerifications = pgTable('tenant_end_user_verifications
     .on(t.tenantId, t.identifier),
 
   expiresIdx: index('tenant_end_user_verifications_expires_idx').on(t.expiresAt),
+
+  // DEL-9: covers the rate-limit lookup
+  //   SELECT ... WHERE tenant_id=? AND identifier=? AND type='otp_login'
+  //   ORDER BY last_requested_at DESC LIMIT 1
+  rateLimitIdx: index('tenant_end_user_verifications_rate_limit_idx')
+    .on(t.tenantId, t.identifier, t.type, t.lastRequestedAt.desc()),
+}));
+
+/**
+ * tenant_otp_lockouts — survives BA's verification-row delete on max attempts
+ *
+ * Better-Auth's `allowedAttempts` config deletes the verification row when
+ * the limit is hit (email-otp/routes.mjs:245-247), wiping any per-row
+ * cooldown state. This separate table holds the lockout marker so the
+ * 15-minute cooldown (auth-spec §6 AC#8) can be enforced on subsequent
+ * OTP requests. Scope is per (tenant_id, identifier) — matches the
+ * tenant-scoped identity invariant from ADR-0003.
+ *
+ * DEL-9 / docs/specs/otp-rate-limiting.md.
+ */
+export const tenantOtpLockouts = pgTable('tenant_otp_lockouts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  // Lowercased email (matches verification.identifier shape).
+  identifier: text('identifier').notNull(),
+
+  // Why the lockout was created. Used by checkOtpRequest to map back to
+  // the right error code:
+  //   - 'too_frequent' → 60s post-send throttle (auth-spec §6 AC#8 first half)
+  //   - 'cooldown'     → 15min after 5 failed verifies (second half)
+  // The 'too_frequent' rows live in this table (and not on the verification
+  // row's last_requested_at) because BA's resolveOTP catches verification.create
+  // errors and re-creates after delete — wiping any verification-row-bound
+  // state. The lockout table survives BA's delete cycle.
+  reason: text('reason').notNull().default('cooldown'),
+
+  // When the cooldown lifts. checkOtpRequest filters `expires_at > now()`.
+  expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  // Hot path: "is there an unexpired lockout for this (tenant, email)?"
+  lookupIdx: index('tenant_otp_lockouts_lookup_idx')
+    .on(t.tenantId, t.identifier, t.expiresAt.desc()),
 }));
 
 // ============================================================================
@@ -684,6 +743,9 @@ export type TenantEndUser = typeof tenantEndUsers.$inferSelect;
 export type NewTenantEndUser = typeof tenantEndUsers.$inferInsert;
 
 export type TenantMembership = typeof tenantMemberships.$inferSelect;
+
+export type TenantOtpLockout = typeof tenantOtpLockouts.$inferSelect;
+export type NewTenantOtpLockout = typeof tenantOtpLockouts.$inferInsert;
 
 // ============================================================================
 // RELATIONS (for Drizzle's relational queries)
