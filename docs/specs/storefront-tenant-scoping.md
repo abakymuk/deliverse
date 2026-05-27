@@ -21,6 +21,8 @@ Make the storefront Better-Auth instance (`packages/auth-core/src/storefront.ts`
 
 After DEL-3 ships, the storefront BA instance is no longer "documented as unsafe to expose" ([`schema-v1-ba-compat.md` §4](./schema-v1-ba-compat.md#4-constraints-carried-forward)), with one explicit carve-out: OAuth account lookup. See §10.
 
+> **Evolution note.** The wrapper's brand-required behavior described in this spec is the M1 state. The **target architecture** ([ADR-0012](../decisions/0012-storefront-brand-tenant-food-hall-architecture.md)) makes brand context optional so tenant-level food-hall storefronts can run. Tenant scoping remains mandatory in all modes. Implementation work is tracked in [`docs/planning/food-hall-architecture-linear-plan.md`](../planning/food-hall-architecture-linear-plan.md).
+
 ## 2. Source of truth
 
 Audit done against installed BA, **not docs**:

@@ -51,6 +51,8 @@ Tenant
 
 A tenant can operate multiple kitchens (locations) and run multiple brands (consumer-facing names). The M:N join `location_brands` supports dark kitchens where one kitchen serves multiple brands.
 
+**Storefront ≠ brand.** The current implementation runs one brand storefront per subdomain (`{brand}.deliverse.app`); the **target architecture** ([ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md)) additionally allows tenant-level food-hall storefronts that host multiple brands behind one URL with a unified cart. Mode 3 (food hall) is not yet implemented — see [`docs/planning/food-hall-architecture-linear-plan.md`](./planning/food-hall-architecture-linear-plan.md) for the delivery plan.
+
 ## Request flow: storefront login
 
 ```
