@@ -43,5 +43,94 @@ jobs:
           BETTER_AUTH_URL: http://localhost:3000
           NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN: localhost:3001
 
-  # e2e job removed — re-add when seed data + tenant subdomain test setup are ready.
-  # Existing tests in apps/*/tests/e2e/ are mostly .skip() placeholders.
+  # E2E job restored in DEL-8 (docs/specs/del-8-e2e-ci-setup.md).
+  # DB strategy: option (i) — Postgres service container, fresh per run.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: check # don't waste DB cycles if lint/typecheck/unit fail
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: deliverse_test
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres -d deliverse_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/deliverse_test
+      BETTER_AUTH_SECRET: ci_secret_at_least_32_chars_long_xx
+      BETTER_AUTH_URL: http://localhost:3000
+      NEXT_PUBLIC_PLATFORM_URL: http://localhost:3000 # platform auth-client reads this
+      NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN: localhost:3001
+      SEED_ADMIN_PASSWORD: SuperSecretPassword123! # seed bakes hash from this
+      E2E_ADMIN_PASSWORD: SuperSecretPassword123! # tests read this; must match seed
+      SEED_TEST_FIXTURES: '1' # adds 2nd tenant for cross-tenant tests
+      INNGEST_DEV: '1'
+      # NODE_ENV intentionally NOT set to 'test' — Next dev under NODE_ENV=test
+      # can hit odd runtime paths; GitHub Actions sets CI=1 automatically and
+      # that's enough signal.
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Playwright lives in apps/* packages, not workspace root.
+      - name: Install Playwright Chromium
+        run: pnpm --filter @rp/platform exec playwright install --with-deps chromium
+
+      - name: Add *.localhost hosts entries
+        # All brand subdomains used by tests today:
+        #   pizza-express + burger-heaven    — canonical seed brands
+        #   other-brand-test                 — DEL-8 SEED_TEST_FIXTURES
+        #   other-brand-del3-test            — storefront-tenant-scoping.spec.ts beforeAll
+        #   admin                            — platform host
+        run: |
+          echo "127.0.0.1 pizza-express.localhost burger-heaven.localhost other-brand-test.localhost other-brand-del3-test.localhost admin.localhost" \
+            | sudo tee -a /etc/hosts
+
+      - name: Migrate test DB
+        run: pnpm --filter @rp/db migrate
+
+      - name: Seed test DB
+        run: pnpm --filter @rp/db seed
+
+      - name: Start Inngest dev server (background sink)
+        # --no-discovery: don't auto-fetch handler registries. We use the CLI
+        # only as a sink for inngest.send(...) so BA route handlers complete
+        # cleanly. No handler/function execution coverage in CI — see
+        # docs/specs/del-8-e2e-ci-setup.md §Inngest scope.
+        # Pre-flight (2026-05-27) confirmed @latest accepts sends as a sink
+        # (HTTP 200). Pin to a known-good when CLI behavior changes.
+        run: pnpm dlx inngest-cli@latest dev --no-discovery &
+
+      - name: Wait for Inngest port
+        run: until nc -z localhost 8288; do sleep 1; done
+        timeout-minutes: 1
+
+      - name: Run platform E2E
+        run: pnpm --filter @rp/platform exec playwright test
+
+      - name: Run storefront E2E
+        run: pnpm --filter @rp/storefront exec playwright test
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: apps/*/playwright-report
+          retention-days: 7
