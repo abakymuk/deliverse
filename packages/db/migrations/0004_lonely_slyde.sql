@@ -1,0 +1,1 @@
+ALTER TABLE "tenant_otp_lockouts" ADD COLUMN "reason" text DEFAULT 'cooldown' NOT NULL;
