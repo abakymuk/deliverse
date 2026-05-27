@@ -82,6 +82,40 @@ export const verificationTypeEnum = pgEnum('verification_type', [
 // CHECK constraint on the table enforces "type='brand' ⟺ primary_brand_id NOT NULL".
 export const storefrontTypeEnum = pgEnum('storefront_type', ['brand', 'tenant']);
 
+// DEL-24: commerce schema enums (ADR-0012 §"Commerce model").
+//
+// Cart lifecycle. 'active' = open; 'abandoned' = user moved on without
+// checkout (status-flip via cleanup job, v2); 'converted' = cart became
+// an order.
+export const cartStatusEnum = pgEnum('cart_status', [
+  'active',
+  'abandoned',
+  'converted',
+]);
+
+// Order lifecycle. Includes KDS-ready states ('preparing', 'ready') up
+// front to avoid a future migration when the kitchen-display work begins,
+// even though they're unread at DEL-24 PR time. 'completed' = handed off
+// to the customer (pickup picked up, delivery delivered). 'cancelled' =
+// no-go; orders are never hard-deleted — historical/audit record.
+export const orderStatusEnum = pgEnum('order_status', [
+  'pending',
+  'confirmed',
+  'preparing',
+  'ready',
+  'completed',
+  'cancelled',
+]);
+
+// Fulfillment type, orthogonal to order_status. Order status describes
+// kitchen lifecycle; fulfillment describes pickup vs delivery. A future
+// `delivery_status` enum (e.g., unassigned|assigned|picked_up|delivered|
+// failed) can be added separately without touching this enum.
+export const fulfillmentTypeEnum = pgEnum('fulfillment_type', [
+  'pickup',
+  'delivery',
+]);
+
 // ============================================================================
 // PLATFORM IDENTITY (apps/platform)
 // ============================================================================
@@ -799,6 +833,263 @@ export const tenantOtpLockouts = pgTable('tenant_otp_lockouts', {
 }));
 
 // ============================================================================
+// COMMERCE (DEL-24 / ADR-0012 §"Commerce model")
+// ============================================================================
+//
+// Carts and orders are scoped to (tenant, location, customer) — NO brand_id
+// ownership column on the parent rows. Brand context lives on line items so
+// a single cart / single order can span brands in food-hall mode (mode 3
+// per ADR-0012).
+//
+// Menus and menu_items belong to brand. Tenant-safety is transitive via
+// brand.tenant_id (no direct tenant_id on menus / menu_items per AC#5).
+//
+// FK action policy:
+//   - Tenant-boundary chains (tenant_id, location_id) CASCADE for GDPR
+//     full-tenant cleanup.
+//   - orders.tenant_end_user_id is SET NULL — preserves order history
+//     through single-user GDPR anonymization.
+//   - order_line_items.brand_id is SET NULL + brand_name_snapshot —
+//     preserves audit history through single-brand removal (intentional
+//     deviation from AC#4; cart_items.brand_id stays NOT NULL since cart
+//     items are transient).
+//
+// Spec: docs/specs/commerce-schema-v1.md.
+
+/**
+ * menus — brand-owned menus
+ *
+ * One brand can have N menus (e.g., breakfast vs lunch). Tenant-safety is
+ * transitive via brand.tenant_id — no direct tenant_id column (AC#5).
+ */
+export const menus = pgTable('menus', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  brandId: uuid('brand_id')
+    .notNull()
+    .references(() => brands.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  description: text('description'),
+
+  isActive: boolean('is_active').notNull().default(true),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  brandIdx: index('menus_brand_idx').on(t.brandId),
+}));
+
+/**
+ * menu_items — items inside a menu
+ *
+ * Brand reached transitively via menu (menu_item → menu → brand). NO
+ * direct brand_id column — keeps a single source of truth and avoids
+ * drift between menu_items.brand_id and menu.brand_id.
+ */
+export const menuItems = pgTable('menu_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  menuId: uuid('menu_id')
+    .notNull()
+    .references(() => menus.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  description: text('description'),
+
+  // Stored in integer cents — avoids floating-point bugs around money.
+  priceCents: integer('price_cents').notNull(),
+
+  isActive: boolean('is_active').notNull().default(true),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  menuIdx: index('menu_items_menu_idx').on(t.menuId),
+}));
+
+/**
+ * carts — open shopping carts
+ *
+ * Scoped to (tenant, location, end_user). NO brand_id (AC#3) — line items
+ * carry brand. Anonymous carts deferred to v2; tenant_end_user_id is
+ * NOT NULL in v1. App enforces "most recent active cart per (user,
+ * location)" — no DB-level uniqueness in v1.
+ */
+export const carts = pgTable('carts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  locationId: uuid('location_id')
+    .notNull()
+    .references(() => locations.id, { onDelete: 'cascade' }),
+
+  tenantEndUserId: uuid('tenant_end_user_id')
+    .notNull()
+    .references(() => tenantEndUsers.id, { onDelete: 'cascade' }),
+
+  status: cartStatusEnum('status').notNull().default('active'),
+
+  // Decided at cart creation (UX picks pickup/delivery before adding
+  // items). Carried forward to the order at checkout. Orthogonal to
+  // order_status — see enum comment above.
+  fulfillmentType: fulfillmentTypeEnum('fulfillment_type').notNull().default('pickup'),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  tenantIdx: index('carts_tenant_idx').on(t.tenantId),
+  userIdx: index('carts_user_idx').on(t.tenantEndUserId),
+  locationIdx: index('carts_location_idx').on(t.locationId),
+  statusIdx: index('carts_status_idx').on(t.status),
+}));
+
+/**
+ * cart_items — line items inside a cart
+ *
+ * brand_id is NOT NULL CASCADE per AC#4. Cart items are transient —
+ * losing them when a tenant/brand/menu_item is hard-deleted is acceptable.
+ *
+ * unit_price_cents is a snapshot at add-to-cart time so concurrent
+ * menu_item price edits don't mutate the cart line under the customer.
+ */
+export const cartItems = pgTable('cart_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  cartId: uuid('cart_id')
+    .notNull()
+    .references(() => carts.id, { onDelete: 'cascade' }),
+
+  brandId: uuid('brand_id')
+    .notNull()
+    .references(() => brands.id, { onDelete: 'cascade' }),
+
+  menuItemId: uuid('menu_item_id')
+    .notNull()
+    .references(() => menuItems.id, { onDelete: 'cascade' }),
+
+  quantity: integer('quantity').notNull().default(1),
+
+  // Untyped jsonb in v1; v2 may pin a shape like
+  // Array<{ id, name, priceDelta }>.
+  modifiersJson: jsonb('modifiers_json').$type<Record<string, unknown>>().notNull().default({}),
+
+  // Snapshot at add-to-cart. See doc-comment above.
+  unitPriceCents: integer('unit_price_cents').notNull(),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  cartIdx: index('cart_items_cart_idx').on(t.cartId),
+  brandIdx: index('cart_items_brand_idx').on(t.brandId),
+  menuItemIdx: index('cart_items_menu_item_idx').on(t.menuItemId),
+}));
+
+/**
+ * orders — submitted orders
+ *
+ * Append-only historical records. NO deletedAt — cancel via
+ * status='cancelled'. NO brand_id ownership column (AC#3).
+ *
+ * tenant_end_user_id is NULLABLE + ON DELETE SET NULL so single-user GDPR
+ * deletion preserves the order as an anonymous historical record. Tenant
+ * hard-delete still cascades through orders via tenant_id CASCADE (full-
+ * tenant GDPR cleanup).
+ */
+export const orders = pgTable('orders', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  locationId: uuid('location_id')
+    .notNull()
+    .references(() => locations.id, { onDelete: 'cascade' }),
+
+  // NULLABLE + SET NULL — preserves order history through single-user
+  // GDPR delete. See spec § "Edge Cases" + § "Intentional Deviation".
+  tenantEndUserId: uuid('tenant_end_user_id')
+    .references(() => tenantEndUsers.id, { onDelete: 'set null' }),
+
+  status: orderStatusEnum('status').notNull().default('pending'),
+
+  // No default — every order must declare its fulfillment mode at create.
+  fulfillmentType: fulfillmentTypeEnum('fulfillment_type').notNull(),
+
+  subtotalCents: integer('subtotal_cents').notNull(),
+  taxCents: integer('tax_cents').notNull().default(0),
+  feeCents: integer('fee_cents').notNull().default(0),
+  tipCents: integer('tip_cents').notNull().default(0),
+  totalCents: integer('total_cents').notNull(),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  tenantIdx: index('orders_tenant_idx').on(t.tenantId),
+  userIdx: index('orders_user_idx').on(t.tenantEndUserId),
+  locationIdx: index('orders_location_idx').on(t.locationId),
+  statusIdx: index('orders_status_idx').on(t.status),
+  createdAtIdx: index('orders_created_at_idx').on(t.createdAt),
+  // Composite for tenant-scoped recency queries (admin "recent orders"
+  // view, cron jobs that walk per-tenant by created_at, etc.).
+  tenantCreatedAtIdx: index('orders_tenant_created_at_idx').on(t.tenantId, t.createdAt.desc()),
+}));
+
+/**
+ * order_line_items — immutable line items inside an order
+ *
+ * brand_id is NULLABLE + ON DELETE SET NULL — intentional deviation from
+ * AC#4 to preserve audit history through single-brand removal.
+ * brand_name_snapshot carries the brand identity forward when the FK is
+ * SET NULL. cart_items.brand_id stays NOT NULL (transient row).
+ *
+ * menu_item_id_snapshot is a soft pointer (no .references()) — survives
+ * menu_item hard-delete. name_snapshot + modifiers_snapshot_json carry
+ * the line's content forward.
+ *
+ * No timestamps, no soft delete — created with the order and never
+ * edited.
+ */
+export const orderLineItems = pgTable('order_line_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  orderId: uuid('order_id')
+    .notNull()
+    .references(() => orders.id, { onDelete: 'cascade' }),
+
+  // NULLABLE + SET NULL — see header comment.
+  brandId: uuid('brand_id')
+    .references(() => brands.id, { onDelete: 'set null' }),
+
+  // Required so analytics can still attribute the line to a brand by name
+  // after a brand hard-delete clears the FK.
+  brandNameSnapshot: text('brand_name_snapshot').notNull(),
+
+  // Soft pointer: no .references(), no FK integrity. Survives menu_item
+  // hard-delete. Orphan IDs are acceptable for a snapshot.
+  menuItemIdSnapshot: uuid('menu_item_id_snapshot'),
+
+  nameSnapshot: text('name_snapshot').notNull(),
+
+  quantity: integer('quantity').notNull(),
+
+  modifiersSnapshotJson: jsonb('modifiers_snapshot_json').$type<Record<string, unknown>>().notNull().default({}),
+
+  unitPriceCents: integer('unit_price_cents').notNull(),
+  totalCents: integer('total_cents').notNull(),
+}, (t) => ({
+  orderIdx: index('order_line_items_order_idx').on(t.orderId),
+  brandIdx: index('order_line_items_brand_idx').on(t.brandId),
+}));
+
+// ============================================================================
 // TYPE HELPERS (for application code)
 // ============================================================================
 
@@ -829,6 +1120,25 @@ export type NewTenantOtpLockout = typeof tenantOtpLockouts.$inferInsert;
 export type Storefront = typeof storefronts.$inferSelect;
 export type NewStorefront = typeof storefronts.$inferInsert;
 
+// DEL-24: commerce types
+export type Menu = typeof menus.$inferSelect;
+export type NewMenu = typeof menus.$inferInsert;
+
+export type MenuItem = typeof menuItems.$inferSelect;
+export type NewMenuItem = typeof menuItems.$inferInsert;
+
+export type Cart = typeof carts.$inferSelect;
+export type NewCart = typeof carts.$inferInsert;
+
+export type CartItem = typeof cartItems.$inferSelect;
+export type NewCartItem = typeof cartItems.$inferInsert;
+
+export type Order = typeof orders.$inferSelect;
+export type NewOrder = typeof orders.$inferInsert;
+
+export type OrderLineItem = typeof orderLineItems.$inferSelect;
+export type NewOrderLineItem = typeof orderLineItems.$inferInsert;
+
 // ============================================================================
 // RELATIONS (for Drizzle's relational queries)
 // ============================================================================
@@ -845,6 +1155,9 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   memberships: many(tenantMemberships),
   endUsers: many(tenantEndUsers),
   storefronts: many(storefronts),
+  // DEL-24: commerce.
+  carts: many(carts),
+  orders: many(orders),
 }));
 
 export const brandsRelations = relations(brands, ({ one, many }) => ({
@@ -857,6 +1170,11 @@ export const brandsRelations = relations(brands, ({ one, many }) => ({
   // (e.g., after slug rename + soft-delete cycle). No reverse "primary
   // storefront" pointer — app-layer picks the active one when needed.
   storefronts: many(storefronts),
+  // DEL-24: commerce. Note: no direct menuItems relation — chain is
+  // brand → menus → menu_items per ADR-0012 / spec § "Data Model Changes".
+  menus: many(menus),
+  cartItems: many(cartItems),
+  orderLineItems: many(orderLineItems),
 }));
 
 export const storefrontsRelations = relations(storefronts, ({ one }) => ({
@@ -876,6 +1194,9 @@ export const locationsRelations = relations(locations, ({ one, many }) => ({
     references: [tenants.id],
   }),
   brands: many(locationBrands),
+  // DEL-24: commerce.
+  carts: many(carts),
+  orders: many(orders),
 }));
 
 export const locationBrandsRelations = relations(locationBrands, ({ one }) => ({
@@ -896,6 +1217,9 @@ export const tenantEndUsersRelations = relations(tenantEndUsers, ({ one, many })
   }),
   accounts: many(tenantEndUserAccounts),
   sessions: many(tenantEndUserSessions),
+  // DEL-24: commerce.
+  carts: many(carts),
+  orders: many(orders),
 }));
 
 export const tenantMembershipsRelations = relations(tenantMemberships, ({ one }) => ({
@@ -906,5 +1230,87 @@ export const tenantMembershipsRelations = relations(tenantMemberships, ({ one })
   tenant: one(tenants, {
     fields: [tenantMemberships.tenantId],
     references: [tenants.id],
+  }),
+}));
+
+// ============================================================================
+// COMMERCE RELATIONS (DEL-24)
+// ============================================================================
+
+export const menusRelations = relations(menus, ({ one, many }) => ({
+  brand: one(brands, {
+    fields: [menus.brandId],
+    references: [brands.id],
+  }),
+  items: many(menuItems),
+}));
+
+export const menuItemsRelations = relations(menuItems, ({ one }) => ({
+  menu: one(menus, {
+    fields: [menuItems.menuId],
+    references: [menus.id],
+  }),
+  // No direct brand relation — chain via menu (per ADR-0012 / spec).
+}));
+
+export const cartsRelations = relations(carts, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [carts.tenantId],
+    references: [tenants.id],
+  }),
+  location: one(locations, {
+    fields: [carts.locationId],
+    references: [locations.id],
+  }),
+  tenantEndUser: one(tenantEndUsers, {
+    fields: [carts.tenantEndUserId],
+    references: [tenantEndUsers.id],
+  }),
+  items: many(cartItems),
+}));
+
+export const cartItemsRelations = relations(cartItems, ({ one }) => ({
+  cart: one(carts, {
+    fields: [cartItems.cartId],
+    references: [carts.id],
+  }),
+  brand: one(brands, {
+    fields: [cartItems.brandId],
+    references: [brands.id],
+  }),
+  menuItem: one(menuItems, {
+    fields: [cartItems.menuItemId],
+    references: [menuItems.id],
+  }),
+}));
+
+export const ordersRelations = relations(orders, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [orders.tenantId],
+    references: [tenants.id],
+  }),
+  location: one(locations, {
+    fields: [orders.locationId],
+    references: [locations.id],
+  }),
+  // tenantEndUser is nullable — orders.tenant_end_user_id SET NULL on
+  // single-user GDPR delete; relation typed accordingly.
+  tenantEndUser: one(tenantEndUsers, {
+    fields: [orders.tenantEndUserId],
+    references: [tenantEndUsers.id],
+  }),
+  lineItems: many(orderLineItems),
+}));
+
+export const orderLineItemsRelations = relations(orderLineItems, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderLineItems.orderId],
+    references: [orders.id],
+  }),
+  // brand is nullable — order_line_items.brand_id SET NULL on single-brand
+  // hard-delete (history preserved via brand_name_snapshot).
+  brand: one(brands, {
+    fields: [orderLineItems.brandId],
+    references: [brands.id],
   }),
 }));
