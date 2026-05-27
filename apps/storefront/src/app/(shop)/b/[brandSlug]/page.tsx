@@ -4,6 +4,8 @@ import { and, asc, eq, isNull } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { auth } from '@/lib/auth';
+import { CartLink } from '@/components/cart/cart-link';
 import { MenuView } from '@/components/menu/menu-view';
 import { brandThemeStyle } from '@/lib/brand-theme';
 import { getStorefrontContext } from '@/lib/tenant-resolution';
@@ -84,23 +86,26 @@ export default async function BrandSubsection({
 
   const h = await headers();
   const storefrontName = h.get('x-storefront-name') ?? '';
+  const session = await auth.api.getSession({ headers: h });
+  const tenantEndUserId = session?.user.id;
 
   return (
     <div
       style={brandThemeStyle(row.brandingJson)}
       className="container mx-auto p-8"
     >
-      <div className="mb-6">
+      <div className="mb-6 flex items-center justify-between gap-4">
         <Link
           href="/"
           className="text-sm text-[var(--color-muted-foreground)] hover:underline"
         >
           ← {storefrontName}
         </Link>
+        <CartLink tenantId={ctx.tenantId} tenantEndUserId={tenantEndUserId} />
       </div>
       <h1 className="text-4xl font-bold">{row.name}</h1>
       <div className="mt-8">
-        <MenuView brandId={row.id} />
+        <MenuView brandId={row.id} currentPath={`/b/${brandSlug}`} />
       </div>
     </div>
   );

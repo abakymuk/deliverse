@@ -1,5 +1,7 @@
 import { headers } from 'next/headers';
 import { notFound } from 'next/navigation';
+import { auth } from '@/lib/auth';
+import { CartLink } from '@/components/cart/cart-link';
 import { BrandDirectory } from '@/components/food-hall/brand-directory';
 import { MenuView } from '@/components/menu/menu-view';
 import { brandThemeStyle } from '@/lib/brand-theme';
@@ -23,6 +25,9 @@ export default async function StorefrontHome() {
   const ctx = await getStorefrontContext();
   if (!ctx) notFound();
 
+  const session = await auth.api.getSession({ headers: await headers() });
+  const tenantEndUserId = session?.user.id;
+
   if (ctx.storefrontType === 'brand') {
     if (!ctx.brandSlug) notFound();
     const brandCtx = await getBrandContext(ctx.brandSlug);
@@ -32,9 +37,12 @@ export default async function StorefrontHome() {
         style={brandThemeStyle(brandCtx.brand.brandingJson)}
         className="container mx-auto p-8"
       >
-        <h1 className="text-4xl font-bold">{brandCtx.brand.name}</h1>
+        <div className="flex items-start justify-between gap-4">
+          <h1 className="text-4xl font-bold">{brandCtx.brand.name}</h1>
+          <CartLink tenantId={ctx.tenantId} tenantEndUserId={tenantEndUserId} />
+        </div>
         <div className="mt-8">
-          <MenuView brandId={brandCtx.brand.id} />
+          <MenuView brandId={brandCtx.brand.id} currentPath="/" />
         </div>
       </div>
     );
@@ -46,10 +54,15 @@ export default async function StorefrontHome() {
   const storefrontName = h.get('x-storefront-name') ?? '';
   return (
     <div className="container mx-auto p-8">
-      <h1 className="text-4xl font-bold">{storefrontName}</h1>
-      <p className="mt-2 text-[var(--color-muted-foreground)]">
-        Choose a brand to start your order.
-      </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-4xl font-bold">{storefrontName}</h1>
+          <p className="mt-2 text-[var(--color-muted-foreground)]">
+            Choose a brand to start your order.
+          </p>
+        </div>
+        <CartLink tenantId={ctx.tenantId} tenantEndUserId={tenantEndUserId} />
+      </div>
       <div className="mt-8">
         <BrandDirectory tenantId={ctx.tenantId} />
       </div>

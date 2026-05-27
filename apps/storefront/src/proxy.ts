@@ -30,7 +30,10 @@ const PUBLIC_PATHS = [
   '/reset-password',
 ];
 
-const PROTECTED_PATHS = ['/account', '/orders'];
+// DEL-25 PR 25b: /cart added — passive cart views require login; the
+// cart-server-actions also re-check session and redirect, but the proxy
+// gate is cheaper for unauthenticated GETs.
+const PROTECTED_PATHS = ['/account', '/orders', '/cart'];
 
 const PROXY_OWNED_HEADERS = [
   'x-storefront-id',

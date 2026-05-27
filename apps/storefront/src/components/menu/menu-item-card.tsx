@@ -1,25 +1,33 @@
-import { Button } from '@rp/ui/components/button';
 import { Card, CardContent } from '@rp/ui/components/card';
+import { AddToCartButton } from './add-to-cart-button';
 
 type MenuItemCardProps = {
+  menuItemId: string;
   name: string;
   description: string | null;
   priceCents: number;
+  /**
+   * The page path the menu is rendered on. Passed to the
+   * `<AddToCartButton>` form so the server action can compose the
+   * `/login?next=<path>` redirect (anonymous users) and revalidate the
+   * right page after a successful add. Mode 1/2 brand home: `/`. Mode 3
+   * brand subsection: `/b/<slug>`.
+   */
+  currentPath: string;
 };
 
 /**
- * RSC. Single menu item card.
- *
- * DEL-25 PR 25a: the "Add" button is a disabled stub. PR 25b replaces it
- * with a functional `<AddToCartButton>` client component that calls the
- * `addToCartAction` server action.
+ * RSC. Single menu item card. Add button is functional in PR 25b — the
+ * stub from PR 25a is replaced with `<AddToCartButton>`.
  *
  * docs/specs/food-hall-storefront.md.
  */
 export function MenuItemCard({
+  menuItemId,
   name,
   description,
   priceCents,
+  currentPath,
 }: MenuItemCardProps) {
   const price = (priceCents / 100).toFixed(2);
   return (
@@ -34,10 +42,7 @@ export function MenuItemCard({
           )}
           <p className="mt-2 text-sm font-semibold">${price}</p>
         </div>
-        {/* PR 25b replaces this stub with <AddToCartButton menuItemId={...} brandSlug={...} /> */}
-        <Button disabled aria-disabled className="self-center">
-          Add
-        </Button>
+        <AddToCartButton menuItemId={menuItemId} currentPath={currentPath} />
       </CardContent>
     </Card>
   );
