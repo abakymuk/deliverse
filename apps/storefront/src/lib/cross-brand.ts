@@ -1,19 +1,17 @@
 /**
- * Cross-brand helpers for the storefront — used by the signup page's disclosure
- * component to list sibling brands within the same tenant.
+ * Cross-brand helpers for the storefront.
  *
- * Mirrors the shape of `packages/emails/src/brand-context.ts`'s Drizzle query
- * style (raw `db.select().from(brands).where(...)`) but doesn't share — this
- * helper has different where-clause semantics (sibling listing vs. specific
- * brand lookup) and lives in the storefront app, not the emails package.
+ * - `getSiblingBrands` (DEL-7): always-on signup-page disclosure listing
+ *   sibling brands within the same tenant.
+ * - `checkEmailExistsInTenant` + `hasUserVisitedBrand` (DEL-14): drive the
+ *   verify-otp "Welcome back!" personalization when a user crosses brands
+ *   within the same tenant for the first time. See docs/specs/auth-ui.md
+ *   §5e DEL-14 extension + §7 for the trigger logic.
  *
- * Per `docs/specs/auth-ui.md` §4 decision #1: the disclosure is always-on
- * (not conditional on email lookup) when there's at least one sibling brand,
- * so this helper only needs to enumerate sibling brands — no email-existence
- * check.
+ * Drizzle query style mirrors `packages/emails/src/brand-context.ts`.
  */
 
-import { type Brand, brands, db } from '@rp/db';
+import { type Brand, brands, db, tenantEndUserSessions, tenantEndUsers } from '@rp/db';
 import { and, eq, isNull, ne } from 'drizzle-orm';
 
 /**
@@ -37,4 +35,55 @@ export async function getSiblingBrands(
       ),
     )
     .orderBy(brands.name);
+}
+
+/**
+ * DEL-14: returns true iff the email already has an active (non-soft-deleted)
+ * account at this tenant. Used by `verify-otp/page.tsx` to decide whether to
+ * render the welcome-back copy.
+ */
+export async function checkEmailExistsInTenant(tenantId: string, email: string): Promise<boolean> {
+  const rows = await db
+    .select({ id: tenantEndUsers.id })
+    .from(tenantEndUsers)
+    .where(
+      and(
+        eq(tenantEndUsers.tenantId, tenantId),
+        eq(tenantEndUsers.email, email),
+        isNull(tenantEndUsers.deletedAt),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
+}
+
+/**
+ * DEL-14: returns true iff the (tenant, email) user has at least one prior
+ * session at this specific brand. Combined with `checkEmailExistsInTenant`,
+ * `welcomeBack = emailExists && !visitedCurrentBrand` — the user has an
+ * account in this tenant but has never been at the brand they're on now.
+ *
+ * Single-query: inner-join sessions to user with the matching brand predicate
+ * so we don't roundtrip just to get the user ID first. Sessions cascade-delete
+ * with the user, so a stale row never lingers past account deletion.
+ */
+export async function hasUserVisitedBrand(
+  tenantId: string,
+  email: string,
+  brandId: string,
+): Promise<boolean> {
+  const rows = await db
+    .select({ id: tenantEndUserSessions.id })
+    .from(tenantEndUserSessions)
+    .innerJoin(tenantEndUsers, eq(tenantEndUsers.id, tenantEndUserSessions.tenantEndUserId))
+    .where(
+      and(
+        eq(tenantEndUsers.tenantId, tenantId),
+        eq(tenantEndUsers.email, email),
+        isNull(tenantEndUsers.deletedAt),
+        eq(tenantEndUserSessions.currentBrandId, brandId),
+      ),
+    )
+    .limit(1);
+  return rows.length > 0;
 }

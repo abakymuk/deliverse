@@ -31,7 +31,16 @@ const verifySchema = z.object({
 });
 type VerifyValues = z.infer<typeof verifySchema>;
 
-export function VerifyOtpForm() {
+type VerifyOtpFormProps = {
+  /** DEL-14: when true, render the cross-brand welcome-back copy. */
+  welcomeBack?: boolean;
+  /** Current brand display name (e.g., "Burger Heaven"). Required when welcomeBack. */
+  brandName?: string;
+  /** Tenant display name (e.g., "Hospitality Group"). Required when welcomeBack. */
+  tenantName?: string;
+};
+
+export function VerifyOtpForm({ welcomeBack, brandName, tenantName }: VerifyOtpFormProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get('email') ?? '';
@@ -85,11 +94,25 @@ export function VerifyOtpForm() {
     }
   }
 
+  // DEL-14: only render the welcome-back copy when all three props are present.
+  // brandName/tenantName are required by the copy template; guard against
+  // partial prop-passing rather than render an incomplete sentence.
+  const showWelcomeBack = welcomeBack === true && !!brandName && !!tenantName;
+
   return (
     <Card>
       <CardHeader className="text-center">
-        <CardTitle>Check your email</CardTitle>
-        <CardDescription>We sent a 6-digit code to {email}</CardDescription>
+        <CardTitle>{showWelcomeBack ? 'Welcome back!' : 'Check your email'}</CardTitle>
+        <CardDescription>
+          {showWelcomeBack ? (
+            <>
+              We&apos;ve sent a code to {email}. ({brandName} is part of {tenantName}&apos;s family
+              of brands — your account works here too.)
+            </>
+          ) : (
+            <>We sent a 6-digit code to {email}</>
+          )}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit(onSubmit)} noValidate>

@@ -42,7 +42,7 @@ Net surface relative to Linear AC: **+4 pages, +4 forms** (forgot/reset × 2 app
 | 3 | **Platform verify-email landing: `callbackURL=/dashboard?accept=<invitationId>`**. After BA auto-signs-in (`autoSignInAfterVerification: true`), the user lands on `/dashboard`. A client-side accept-invitation hook reads `?accept=<id>` and calls `organization.acceptInvitation({ invitationId })`, then strips the query. | Without the hook, signup users have no tenant membership row → broken end-to-end UX. `useSearchParams()` lives in a client component because Next 16 server layouts don't receive `searchParams` (only pages do). |
 | 4 | **Storefront signup is OTP-only.** Google button omitted from signup form (still on login form — pre-existing surface, not regressed). | DEL-12 hasn't tenant-scoped storefront OAuth accounts table. Login is safe for existing OAuth users; signup would violate `(provider_id, account_id)` global uniqueness. |
 | 5 | **Invitation email wiring deferred to follow-up issue.** DEL-7 ships the signup form that consumes `?token=<invitationId>`; invitation URLs constructed manually (curl / future admin dashboard). | Same shape as DEL-6's transactional emails (~300 lines). Outside DEL-7's already-expanded scope. Follow-up DEL ticket filed when this PR opens. |
-| 6 | **No `checkEmailExistsInTenant` helper.** Cross-brand component is purely brand-context-driven via `getSiblingBrands(tenantId, currentBrandSlug)`. Email-lookup deferred along with "Welcome back!" personalization. | Smaller surface; avoids enumeration concern. |
+| 6 | ~~**No `checkEmailExistsInTenant` helper.**~~ DEL-14 added it for the `/verify-otp` welcome-back surface (§5e amendment). Signup-side cross-brand disclosure remains brand-context-driven via `getSiblingBrands`. | DEL-14 closed the deferred personalization. |
 | 7 | **Platform invite-accept is a two-step flow.** `signUp.email` → BA fires verify email → user clicks link → BA verifies + autoSignIn → dashboard accept hook calls `acceptInvitation`. The form cannot pass name/password to `acceptInvitation` directly. | `crud-invites.mjs:222-304,247` — BA requires an existing session + `emailVerified === true` before allowing invitation acceptance. |
 | 8 | **Storefront signup threads `name` via query.** BA's `emailOtp.sendVerificationOtp({ email, type })` ignores name; only `signIn.emailOtp({ email, otp, name })` uses it (when creating a first-time user). Signup form redirects to `/verify-otp?email=...&name=...&signup=true`; verify-otp form passes the query-`name` into the verify call. | Without this, storefront signups land with `name === null` in the DB. |
 | 9 | **`authClient.requestPasswordReset(...)` / `.resetPassword(...)` called directly off the auth-client instance.** Current `apps/{platform,storefront}/src/lib/auth-client.ts` destructures only `signIn`, `signUp`, `signOut`, etc. Either destructure the reset methods too, or call via `authClient.xxx()`. Pick whichever is more consistent with the existing codebase at implementation time. | Avoids over-eager export expansion; same effect either way. |
@@ -83,8 +83,14 @@ Net surface relative to Linear AC: **+4 pages, +4 forms** (forgot/reset × 2 app
 ### 5e. Storefront `/verify-otp` (existing — extended)
 
 - Existing page reads `?email=` and `?next=`. Already wraps in `<Suspense>`.
-- **Extension:** read `?name=` and `?signup=true` too. If `signup === 'true'` AND `name` is present, pass `name` to `signIn.emailOtp({ email, otp, name })`. BA uses `name` only when creating a first-time user.
-- No template change; just the verify-call shape.
+- **DEL-7 extension:** read `?name=` and `?signup=true` too. If `signup === 'true'` AND `name` is present, pass `name` to `signIn.emailOtp({ email, otp, name })`. BA uses `name` only when creating a first-time user.
+- **DEL-14 extension (cross-brand welcome-back):** page becomes a server component. Reads `x-brand-slug` header → `getBrandContext(slug)` → tenant + brand. Reads `?email=` from `searchParams`. Runs two DB lookups in parallel:
+  - `checkEmailExistsInTenant(tenant.id, email)` — does the email already have an account in this tenant?
+  - `hasUserVisitedBrand(tenant.id, email, brand.id)` — does the user have any prior session at the **current** brand?
+  - **Welcome-back condition:** `emailExists && !visitedCurrentBrand`. This is the literal AC#3 interpretation: "the brand they're on now != the one they previously signed up at" — if the user has any account in the tenant but no session at the current brand, they're crossing brands for the first time on this device.
+  - Page passes `{ welcomeBack, brandName, tenantName }` props to `<VerifyOtpForm />`. Form stays a client component for `useForm`/`useSearchParams`; new props are server-derived and stable for the page render.
+- **Copy** (auth-spec §10 line 175): when `welcomeBack` is true, the form's `CardDescription` reads "Welcome back! We've sent a code to {email}. ({Brand Name} is part of {Tenant Name}'s family of brands — your account works here too.)" Default copy ("We sent a 6-digit code to {email}") stays for all other cases.
+- **Privacy posture:** the in-tenant enumeration surface is bounded — only users who already have an account in this tenant see the welcome-back copy. The default copy is identical regardless of email-existence, so an attacker probing emails learns nothing new vs the existing OTP-send path (which already lazily creates users via BA's emailOTP plugin). Per auth-spec §10 "Do NOT": we never auto-populate name/preferences from the sibling-brand account.
 
 ### 5f. Storefront `/forgot-password`
 
@@ -113,7 +119,7 @@ type Props = {
 
 Styled as a muted info card above the form (no border emphasis, friendly tone). The `(auth)/layout.tsx` already renders the tenant name in the header — this component is **additive**: it lists the sibling brands explicitly.
 
-## 7. `cross-brand.ts` helper
+## 7. `cross-brand.ts` helpers
 
 ```ts
 // apps/storefront/src/lib/cross-brand.ts
@@ -121,11 +127,26 @@ export async function getSiblingBrands(
   tenantId: string,
   currentBrandSlug: string,
 ): Promise<Brand[]>;
+
+// DEL-14
+export async function checkEmailExistsInTenant(
+  tenantId: string,
+  email: string,
+): Promise<boolean>;
+
+// DEL-14
+export async function hasUserVisitedBrand(
+  tenantId: string,
+  email: string,
+  brandId: string,
+): Promise<boolean>;
 ```
 
-Queries `brands` where `tenantId = $1 AND slug != $2 AND deletedAt IS NULL AND isActive = true`. Returns empty array if no siblings. Same shape as [`packages/emails/src/brand-context.ts`](../../packages/emails/src/brand-context.ts) — Drizzle `select().from(brands).where(...).orderBy(brands.name)`.
+- `getSiblingBrands`: queries `brands` where `tenantId = $1 AND slug != $2 AND deletedAt IS NULL AND isActive = true`. Returns empty array if no siblings.
+- `checkEmailExistsInTenant`: queries `tenant_end_users` where `tenantId = $1 AND email = $2 AND deletedAt IS NULL`. Returns boolean (LIMIT 1 + presence check).
+- `hasUserVisitedBrand`: joins `tenant_end_users` → `tenant_end_user_sessions` where `tenantId = $1 AND email = $2 AND deletedAt IS NULL AND currentBrandId = $3`. Returns boolean (LIMIT 1 + presence check). Sessions older than `expiresIn` (30d, see `storefront.ts`) may be cleaned up — this is a low-precision signal for "user has been here recently" which is acceptable for the welcome-back UX trade-off (over-triggering on returning users with expired sessions is benign).
 
-Unit tests mirror `packages/emails/__tests__/brand-context.test.ts`'s mock pattern.
+All three follow the same Drizzle `select().from(...).where(...)` style as `packages/emails/src/brand-context.ts`. Unit tests mirror `packages/emails/__tests__/brand-context.test.ts`'s mock pattern (mock `@rp/db` at the module boundary, assert where-clause semantics).
 
 ## 8. Accept-invitation hook
 
@@ -203,7 +224,7 @@ Setup same as DEL-5/DEL-6: `pnpm dlx inngest-cli@latest dev` + `doppler run --co
 ## 11. Out of scope (deferred, with explicit owners)
 
 - **Invitation email wiring** (`email.invitation.requested` event + handler + template + BA `sendInvitationEmail` callback) — follow-up DEL ticket filed when this PR opens. Same shape as DEL-6.
-- **Cross-brand "Welcome back!" personalization on `/verify-otp`** — `auth-spec.md` §10 line 175 copy. Follow-up DEL ticket; requires `checkEmailExistsInTenant` helper + verify-otp page rework.
+- ~~**Cross-brand "Welcome back!" personalization on `/verify-otp`**~~ — shipped via [DEL-14](https://linear.app/oveglobal/issue/DEL-14). See §5e DEL-14 extension + §7 `cross-brand.ts` helpers.
 - **Storefront OAuth signup** — gated on [DEL-12](https://linear.app/oveglobal/issue/DEL-12).
 - **Multi-tenant E2E test seed** — gated on [DEL-8](https://linear.app/oveglobal/issue/DEL-8).
 - **`/welcome` / `/account/setup` flows** — not requested.
