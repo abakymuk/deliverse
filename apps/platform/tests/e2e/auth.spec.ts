@@ -9,10 +9,13 @@ import { test, expect } from '@playwright/test';
  *   - Session expiry
  *   - Logout
  *
- * Assumes seed data created a test admin user:
- *   email: admin@test.local
- *   password: SuperSecretPassword123!
+ * Assumes seed data created a test admin user (admin@test.local).
+ * Password comes from E2E_ADMIN_PASSWORD env (set by CI to match
+ * SEED_ADMIN_PASSWORD). Local default = 'Admin-Dev-Pass-1' (matches
+ * seed.ts DEFAULT_ADMIN_PASSWORD when SEED_ADMIN_PASSWORD isn't set).
  */
+
+const ADMIN_PW = process.env.E2E_ADMIN_PASSWORD ?? 'Admin-Dev-Pass-1';
 
 test.describe('Platform Auth', () => {
   test('redirects unauthenticated users to login', async ({ page }) => {
@@ -30,7 +33,7 @@ test.describe('Platform Auth', () => {
   test('successful login with email/password', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel(/email/i).fill('admin@test.local');
-    await page.getByLabel(/password/i).fill('SuperSecretPassword123!');
+    await page.getByLabel(/password/i).fill(ADMIN_PW);
     await page.getByRole('button', { name: /sign in/i }).click();
 
     await expect(page).toHaveURL(/\/dashboard/);
@@ -50,7 +53,7 @@ test.describe('Platform Auth', () => {
     await expect(page).toHaveURL(/\/login\?next=/);
 
     await page.getByLabel(/email/i).fill('admin@test.local');
-    await page.getByLabel(/password/i).fill('SuperSecretPassword123!');
+    await page.getByLabel(/password/i).fill(ADMIN_PW);
     await page.getByRole('button', { name: /sign in/i }).click();
 
     await expect(page).toHaveURL(/\/dashboard\/tenants/);
