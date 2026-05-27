@@ -33,7 +33,13 @@ import { deriveVerificationType } from './storefront-verification-type';
 
 export type StorefrontTenantContext = {
   tenantId: string;
-  brandId: string;
+  /**
+   * Brand UUID when the host resolved to `storefrontType='brand'`; `undefined`
+   * for tenant-mode (food-hall) sessions per ADR-0012 / DEL-21. The resolver
+   * remains brand-required until DEL-22 flips it; the optional shape unlocks
+   * the unit-test branch today.
+   */
+  brandId?: string;
   /**
    * Brand subdomain slug, e.g. 'pizza-express'. Added in DEL-5 so the storefront
    * OTP callback can compose Inngest event payloads without a second DB lookup.
@@ -79,9 +85,15 @@ function wrapMethods(
       }
       if (model === 'session') {
         const ctx = await resolveTenantContext();
+        // DEL-21: stamp UUID for brand-mode sessions; explicit NULL for
+        // tenant-mode (food-hall) sessions. The `?? null` is explicit by
+        // design — relying on Drizzle's undefined-omission behavior would
+        // produce ambiguous SQL and silently regress if a future maintainer
+        // restructures the spread. The branch where `ctx.brandId` is undefined
+        // is unreachable in production until DEL-22 flips the resolver.
         return inner.create({
           model,
-          data: { ...data, currentBrandId: ctx.brandId },
+          data: { ...data, currentBrandId: ctx.brandId ?? null },
           select,
           forceAllowId,
         });
@@ -118,7 +130,7 @@ function wrapMethods(
           data: {
             ...data,
             tenantId: ctx.tenantId,
-            brandId: ctx.brandId,
+            brandId: ctx.brandId, // DEL-23: tighten with ?? null + tenant-default email-branding fallback
             type,
           },
           select,
