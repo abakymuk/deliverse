@@ -1,18 +1,23 @@
 /**
- * Branded OTP email template (React Email v6).
+ * Branded OTP email template (React Email v6) — discriminated by `mode`
+ * (DEL-22).
  *
- * Imports come from the unified `react-email` package (ADR-0011 §Surprise #1:
- * `react-email@6.3.3` re-exports every component, the older deprecated
- * `@react-email/components` standalone is NOT installed).
+ *   - mode='brand' (legacy): brand-themed header (logo or brand name + brand
+ *     color), footer attributes "Sent by ${brand.name}".
+ *   - mode='tenant' (DEL-22, food-hall): storefront-themed header using
+ *     storefront.brandingJson; falls back to tenant.logo, then to
+ *     DELIVERSE_PRIMARY. Footer attributes "Sent by ${storefront.name}".
  *
  * The `type` prop drives the headline + the action verb; everything else is
  * shared across the three OTP flows.
  *
- * Shared layout chrome lives in `./_styles` (extracted in DEL-6 once we had
- * three templates). OTP-specific `codeStyle` stays inline.
+ * Imports come from the unified `react-email` package (ADR-0011 §Surprise #1:
+ * `react-email@6.3.3` re-exports every component).
+ *
+ * Shared layout chrome lives in `./_styles`. OTP-specific `codeStyle` stays inline.
  */
 
-import type { Brand, Tenant } from '@rp/db';
+import type { Brand, Storefront, Tenant } from '@rp/db';
 import { Body, Container, Head, Heading, Html, Img, Preview, Section, Text } from 'react-email';
 import {
   DELIVERSE_PRIMARY,
@@ -28,12 +33,21 @@ import {
   textStyle,
 } from './_styles';
 
-export type OtpEmailProps = {
-  brand: Brand;
-  tenant: Tenant;
-  otp: string;
-  type: 'otp_login' | 'email_verify' | 'password_reset';
-};
+export type OtpEmailProps =
+  | {
+      mode: 'brand';
+      brand: Brand;
+      tenant: Tenant;
+      otp: string;
+      type: 'otp_login' | 'email_verify' | 'password_reset';
+    }
+  | {
+      mode: 'tenant';
+      storefront: Storefront;
+      tenant: Tenant;
+      otp: string;
+      type: 'otp_login' | 'email_verify' | 'password_reset';
+    };
 
 const COPY: Record<OtpEmailProps['type'], { heading: string; instruction: string }> = {
   otp_login: {
@@ -50,25 +64,54 @@ const COPY: Record<OtpEmailProps['type'], { heading: string; instruction: string
   },
 };
 
-export function OtpEmail({ brand, tenant, otp, type }: OtpEmailProps) {
-  const { heading, instruction } = COPY[type];
-  const primary = brand.brandingJson?.primary ?? DELIVERSE_PRIMARY;
-  const logoUrl = brand.brandingJson?.logo;
+type Rendered = {
+  displayName: string;
+  primary: string;
+  logoUrl: string | null | undefined;
+  footerLine: string;
+};
+
+function resolveBranding(props: OtpEmailProps): Rendered {
+  if (props.mode === 'tenant') {
+    // DEL-22 tenant-default branding fallback chain:
+    //   storefront.brandingJson.{primary,logo} → tenant.logo / DELIVERSE_PRIMARY.
+    const displayName = props.storefront.name || props.tenant.name;
+    return {
+      displayName,
+      primary: props.storefront.brandingJson?.primary ?? DELIVERSE_PRIMARY,
+      logoUrl: props.storefront.brandingJson?.logo ?? props.tenant.logo,
+      footerLine: `Sent by ${displayName}.`,
+    };
+  }
+  // mode: 'brand'
+  return {
+    displayName: props.brand.name,
+    primary: props.brand.brandingJson?.primary ?? DELIVERSE_PRIMARY,
+    logoUrl: props.brand.brandingJson?.logo,
+    footerLine: `Sent by ${props.brand.name}${
+      props.tenant.name !== props.brand.name ? ` (${props.tenant.name})` : ''
+    }.`,
+  };
+}
+
+export function OtpEmail(props: OtpEmailProps) {
+  const { heading, instruction } = COPY[props.type];
+  const { displayName, primary, logoUrl, footerLine } = resolveBranding(props);
 
   return (
     <Html>
       <Head>
-        <title>{`${heading} — ${brand.name}`}</title>
+        <title>{`${heading} — ${displayName}`}</title>
       </Head>
-      <Preview>{`${heading} for ${brand.name}`}</Preview>
+      <Preview>{`${heading} for ${displayName}`}</Preview>
       <Body style={bodyStyle}>
         <Container style={containerStyle}>
           <Section style={headerStyle}>
             {logoUrl ? (
-              <Img src={logoUrl} alt={brand.name} width={120} style={{ display: 'block' }} />
+              <Img src={logoUrl} alt={displayName} width={120} style={{ display: 'block' }} />
             ) : (
               <Heading as="h1" style={{ ...brandHeadingStyle, color: primary }}>
-                {brand.name}
+                {displayName}
               </Heading>
             )}
           </Section>
@@ -78,7 +121,7 @@ export function OtpEmail({ brand, tenant, otp, type }: OtpEmailProps) {
               {heading}
             </Heading>
             <Text style={textStyle}>{instruction}</Text>
-            <Text style={codeStyle}>{otp}</Text>
+            <Text style={codeStyle}>{props.otp}</Text>
             <Text style={mutedTextStyle}>
               This code expires in 10 minutes. If you didn&apos;t request it, you can safely ignore
               this email.
@@ -86,10 +129,7 @@ export function OtpEmail({ brand, tenant, otp, type }: OtpEmailProps) {
           </Section>
 
           <Section style={footerStyle}>
-            <Text style={footerTextStyle}>
-              Sent by {brand.name}
-              {tenant.name !== brand.name ? ` (${tenant.name})` : ''}.
-            </Text>
+            <Text style={footerTextStyle}>{footerLine}</Text>
           </Section>
         </Container>
       </Body>

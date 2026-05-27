@@ -1,15 +1,22 @@
 /**
- * Password-reset email template — discriminated by `instance`.
+ * Password-reset email template — discriminated by `instance` and (for
+ * storefront) by `mode` (DEL-22).
  *
- *   - storefront variant: brand-themed header (logo or brand name + brand color),
- *     subject set by the handler to "Reset your password for <brand>".
- *   - platform variant: neutral "Deliverse" header + DELIVERSE_PRIMARY color.
+ *   - platform: neutral "Deliverse" header + DELIVERSE_PRIMARY color.
+ *   - storefront + mode='brand' (legacy): brand-themed header (logo or brand
+ *     name + brand color), subject "Reset your password for <brand>".
+ *   - storefront + mode='tenant' (DEL-22, food-hall): storefront-themed header
+ *     using storefront.brandingJson; falls back to tenant.logo, then to
+ *     DELIVERSE_PRIMARY. Subject "Reset your password for <storefront>".
+ *
+ * Tenant-mode footer omits the parenthetical tenant name — the storefront IS
+ * the tenant-facing entity (see docs/specs/ba-brand-optional.md §"API surface").
  *
  * Shared chrome from `./_styles`. Per-template button styles defined inline.
  * Imports from the unified `react-email` package (ADR-0011).
  */
 
-import type { Brand, Tenant } from '@rp/db';
+import type { Brand, Storefront, Tenant } from '@rp/db';
 import {
   Body,
   Button,
@@ -44,18 +51,59 @@ export type PasswordResetEmailProps =
     }
   | {
       instance: 'storefront';
+      mode: 'brand';
       brand: Brand;
+      tenant: Tenant;
+      url: string;
+    }
+  | {
+      instance: 'storefront';
+      mode: 'tenant';
+      storefront: Storefront;
       tenant: Tenant;
       url: string;
     };
 
+type Rendered = {
+  displayName: string;
+  primary: string;
+  logoUrl: string | null | undefined;
+  footerLine: string;
+};
+
+function resolveBranding(props: PasswordResetEmailProps): Rendered {
+  if (props.instance === 'platform') {
+    return {
+      displayName: DELIVERSE_NAME,
+      primary: DELIVERSE_PRIMARY,
+      logoUrl: undefined,
+      footerLine: `Sent by ${DELIVERSE_NAME}.`,
+    };
+  }
+  if (props.mode === 'tenant') {
+    // DEL-22 tenant-default branding fallback chain:
+    //   storefront.brandingJson.{primary,logo} → tenant.logo / DELIVERSE_PRIMARY.
+    const displayName = props.storefront.name || props.tenant.name;
+    return {
+      displayName,
+      primary: props.storefront.brandingJson?.primary ?? DELIVERSE_PRIMARY,
+      logoUrl: props.storefront.brandingJson?.logo ?? props.tenant.logo,
+      footerLine: `Sent by ${displayName}.`,
+    };
+  }
+  // mode: 'brand' (legacy storefront)
+  return {
+    displayName: props.brand.name,
+    primary: props.brand.brandingJson?.primary ?? DELIVERSE_PRIMARY,
+    logoUrl: props.brand.brandingJson?.logo,
+    footerLine: `Sent by ${props.brand.name}${
+      props.tenant.name !== props.brand.name ? ` (${props.tenant.name})` : ''
+    }.`,
+  };
+}
+
 export function PasswordResetEmail(props: PasswordResetEmailProps) {
-  const displayName = props.instance === 'storefront' ? props.brand.name : DELIVERSE_NAME;
-  const primary =
-    props.instance === 'storefront'
-      ? (props.brand.brandingJson?.primary ?? DELIVERSE_PRIMARY)
-      : DELIVERSE_PRIMARY;
-  const logoUrl = props.instance === 'storefront' ? props.brand.brandingJson?.logo : undefined;
+  const { displayName, primary, logoUrl, footerLine } = resolveBranding(props);
 
   return (
     <Html>
@@ -92,13 +140,7 @@ export function PasswordResetEmail(props: PasswordResetEmailProps) {
           </Section>
 
           <Section style={footerStyle}>
-            <Text style={footerTextStyle}>
-              {props.instance === 'storefront'
-                ? `Sent by ${props.brand.name}${
-                    props.tenant.name !== props.brand.name ? ` (${props.tenant.name})` : ''
-                  }.`
-                : `Sent by ${DELIVERSE_NAME}.`}
-            </Text>
+            <Text style={footerTextStyle}>{footerLine}</Text>
           </Section>
         </Container>
       </Body>

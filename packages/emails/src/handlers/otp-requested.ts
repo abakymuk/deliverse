@@ -10,9 +10,11 @@
  * Flow:
  *   1. Parse incoming data via Zod (defense-in-depth — caller's typing isn't
  *      proof against runtime drift).
- *   2. Re-fetch brand + tenant context from the DB. Verifies
- *      `brand.tenantId === data.tenantId` (cross-tenant defense per
- *      docs/specs/email-delivery.md §10).
+ *   2. Branch on payload shape (DEL-22):
+ *        - Brand-mode (legacy, no `mode` field): resolve brand context, render
+ *          brand-themed template.
+ *        - Tenant-mode (`mode: 'tenant'`): resolve storefront context, render
+ *          tenant-default branding from storefront.brandingJson + tenants fallback.
  *   3. Render the React Email template.
  *   4. Hand off to the Resend wrapper.
  *
@@ -21,15 +23,21 @@
  * change introduces a log line, redact `otp` to `'***'`.
  */
 
-import { resolveEmailBrandContext } from '../brand-context';
+import {
+  resolveEmailBrandContext,
+  resolveTenantStorefrontEmailContext,
+} from '../brand-context';
 import { sendEmail } from '../client';
 import { type OtpRequestedData, otpRequestedEvent } from '../events';
 import { OtpEmail } from '../templates/otp';
 
-const SUBJECTS: Record<OtpRequestedData['type'], (brandName: string) => string> = {
-  otp_login: (brand) => `Your sign-in code for ${brand}`,
-  email_verify: (brand) => `Verify your email for ${brand}`,
-  password_reset: (brand) => `Reset your password for ${brand}`,
+// DEL-22: subjects parameterized by displayName (brand.name in brand-mode,
+// storefront.name in tenant-mode). Brand-mode strings are verbatim today's
+// wording to preserve byte-equivalence for existing brand-host emails.
+const SUBJECTS: Record<OtpRequestedData['type'], (displayName: string) => string> = {
+  otp_login: (name) => `Your sign-in code for ${name}`,
+  email_verify: (name) => `Verify your email for ${name}`,
+  password_reset: (name) => `Reset your password for ${name}`,
 };
 
 export async function handleOtpRequested(data: OtpRequestedData): Promise<{ id: string }> {
@@ -37,12 +45,34 @@ export async function handleOtpRequested(data: OtpRequestedData): Promise<{ id: 
   // caller's TypeScript types should already guarantee shape.
   otpRequestedEvent.shape.data.parse(data);
 
-  const { brand, tenant } = await resolveEmailBrandContext(data.brandSlug, data.tenantId);
+  // Tenant-mode is the only variant carrying `mode`; brand-mode is mode-less
+  // (back-compat with in-flight events). `'mode' in data` is therefore the
+  // sole discriminator and lets TypeScript narrow without a compound predicate.
+  if ('mode' in data) {
+    const { storefront, tenant } = await resolveTenantStorefrontEmailContext(
+      data.storefrontId,
+      data.tenantId,
+    );
+    return sendEmail({
+      to: data.email,
+      subject: SUBJECTS[data.type](storefront.name),
+      react: OtpEmail({
+        mode: 'tenant',
+        storefront,
+        tenant,
+        otp: data.otp,
+        type: data.type,
+      }),
+    });
+  }
 
+  // Brand-mode (default — back-compat with in-flight events lacking `mode`).
+  const { brand, tenant } = await resolveEmailBrandContext(data.brandSlug, data.tenantId);
   return sendEmail({
     to: data.email,
     subject: SUBJECTS[data.type](brand.name),
     react: OtpEmail({
+      mode: 'brand',
       brand,
       tenant,
       otp: data.otp,

@@ -14,7 +14,15 @@
  *     its default policy (4 retries exponential).
  */
 
-import { type Brand, type Tenant, brands, db, tenants } from '@rp/db';
+import {
+  type Brand,
+  type Storefront,
+  type Tenant,
+  brands,
+  db,
+  storefronts,
+  tenants,
+} from '@rp/db';
 import { and, eq, isNull } from 'drizzle-orm';
 
 export class BrandResolutionError extends Error {
@@ -55,6 +63,57 @@ export async function resolveEmailBrandContext(
   if (row.brand.tenantId !== tenantId) {
     throw new BrandResolutionError(
       `tenant ownership mismatch — brand "${brandSlug}" belongs to tenant ${row.brand.tenantId}, event claims ${tenantId}`,
+    );
+  }
+  return row;
+}
+
+// ── Tenant-mode (food-hall) email context — DEL-22 ─────────────────────────
+//
+// Tenant-host emails (food-hall mode per ADR-0012) have no `brand` context.
+// Email branding falls back to the storefront's own `branding_json` +
+// `tenants.name` / `tenants.logo` as the source of truth. This resolver
+// mirrors `resolveEmailBrandContext`'s cross-tenant defense (SQL-side
+// `eq(storefronts.tenantId, tenantId)` + post-read mismatch check).
+
+export type EmailStorefrontContext = {
+  storefront: Storefront;
+  tenant: Tenant;
+};
+
+export async function resolveTenantStorefrontEmailContext(
+  storefrontId: string,
+  tenantId: string,
+): Promise<EmailStorefrontContext> {
+  const result = await db
+    .select({ storefront: storefronts, tenant: tenants })
+    .from(storefronts)
+    .innerJoin(tenants, eq(storefronts.tenantId, tenants.id))
+    .where(
+      and(
+        eq(storefronts.id, storefrontId),
+        // Belt-and-braces: cross-tenant defense in SQL, not just post-read.
+        eq(storefronts.tenantId, tenantId),
+        isNull(storefronts.deletedAt),
+        eq(storefronts.isActive, true),
+        isNull(tenants.deletedAt),
+        eq(tenants.status, 'active'),
+      ),
+    )
+    .limit(1);
+
+  const row = result[0];
+  if (!row) {
+    throw new BrandResolutionError(
+      `no active storefront for storefrontId=${storefrontId} tenantId=${tenantId}`,
+    );
+  }
+  // SQL-side guard already enforces ownership; the post-read check is
+  // symmetric with `resolveEmailBrandContext` and would surface a clearer
+  // error if the SQL guard were ever removed.
+  if (row.storefront.tenantId !== tenantId) {
+    throw new BrandResolutionError(
+      `tenant ownership mismatch — storefront ${storefrontId} belongs to tenant ${row.storefront.tenantId}, event claims ${tenantId}`,
     );
   }
   return row;
