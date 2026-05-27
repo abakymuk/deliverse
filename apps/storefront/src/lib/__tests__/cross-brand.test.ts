@@ -39,18 +39,24 @@ const tacoTown = {
   name: 'Taco Town',
 };
 
-// The terminal `.orderBy(...)` call in the helper resolves the promise.
+// Terminal-method mocks: getSiblingBrands ends with `.orderBy(...)`;
+// checkEmailExistsInTenant / hasUserVisitedBrand end with `.limit(...)`.
 const orderByMock = vi.fn();
+const limitMock = vi.fn();
 
 vi.mock('@rp/db', () => {
   const chain = {
     from: () => chain,
+    innerJoin: () => chain,
     where: () => chain,
     orderBy: orderByMock,
+    limit: limitMock,
   };
   return {
-    db: { select: () => chain },
+    db: { select: (..._args: unknown[]) => chain },
     brands: {},
+    tenantEndUsers: {},
+    tenantEndUserSessions: {},
   };
 });
 
@@ -61,10 +67,13 @@ vi.mock('drizzle-orm', () => ({
   ne: vi.fn(),
 }));
 
-const { getSiblingBrands } = await import('../cross-brand');
+const { checkEmailExistsInTenant, getSiblingBrands, hasUserVisitedBrand } = await import(
+  '../cross-brand'
+);
 
 beforeEach(() => {
   orderByMock.mockReset();
+  limitMock.mockReset();
 });
 
 describe('getSiblingBrands', () => {
@@ -116,5 +125,65 @@ describe('getSiblingBrands', () => {
     expect(result).not.toContain(inactive);
     expect(result).not.toContain(deleted);
     expect(result).not.toContain(otherTenant);
+  });
+});
+
+describe('checkEmailExistsInTenant (DEL-14)', () => {
+  it('returns true when the where-clause matches a row', async () => {
+    limitMock.mockResolvedValue([{ id: 'user-id-1' }]);
+    const result = await checkEmailExistsInTenant(TENANT_ID, 'guest@test.local');
+    expect(result).toBe(true);
+  });
+
+  it('returns false when SQL returns no rows (email not in tenant)', async () => {
+    limitMock.mockResolvedValue([]);
+    const result = await checkEmailExistsInTenant(TENANT_ID, 'unknown@test.local');
+    expect(result).toBe(false);
+  });
+
+  it('returns false for soft-deleted users (where-clause filters in SQL)', async () => {
+    // The helper trusts the `isNull(deletedAt)` predicate; mock returns
+    // nothing because SQL filtered the soft-deleted row.
+    limitMock.mockResolvedValue([]);
+    const result = await checkEmailExistsInTenant(TENANT_ID, 'deleted@test.local');
+    expect(result).toBe(false);
+  });
+
+  it('returns false for same email at a different tenant (where-clause filters in SQL)', async () => {
+    limitMock.mockResolvedValue([]);
+    const result = await checkEmailExistsInTenant(OTHER_TENANT_ID, 'guest@test.local');
+    expect(result).toBe(false);
+  });
+});
+
+describe('hasUserVisitedBrand (DEL-14)', () => {
+  const PIZZA_BRAND_ID = '22222222-2222-4222-9222-222222222222';
+  const BURGER_BRAND_ID = '33333333-3333-4333-9333-333333333333';
+
+  it('returns true when the user has at least one session at the brand', async () => {
+    limitMock.mockResolvedValue([{ id: 'session-id-1' }]);
+    const result = await hasUserVisitedBrand(TENANT_ID, 'guest@test.local', PIZZA_BRAND_ID);
+    expect(result).toBe(true);
+  });
+
+  it('returns false when the user has no sessions at the brand', async () => {
+    // SQL returned nothing because no row matched (user_email AND current_brand_id).
+    limitMock.mockResolvedValue([]);
+    const result = await hasUserVisitedBrand(TENANT_ID, 'guest@test.local', BURGER_BRAND_ID);
+    expect(result).toBe(false);
+  });
+
+  it('returns false when the user does not exist in the tenant at all', async () => {
+    limitMock.mockResolvedValue([]);
+    const result = await hasUserVisitedBrand(TENANT_ID, 'unknown@test.local', PIZZA_BRAND_ID);
+    expect(result).toBe(false);
+  });
+
+  it('returns false for soft-deleted users (where-clause filters in SQL)', async () => {
+    // The inner-join + isNull(deletedAt) predicate excludes soft-deleted users
+    // before the brand match is even evaluated.
+    limitMock.mockResolvedValue([]);
+    const result = await hasUserVisitedBrand(TENANT_ID, 'deleted@test.local', PIZZA_BRAND_ID);
+    expect(result).toBe(false);
   });
 });

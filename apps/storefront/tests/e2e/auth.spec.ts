@@ -58,6 +58,62 @@ test.describe('Cross-brand recognition (same tenant)', () => {
     await expect(page.getByText(/Burger Heaven/)).toBeVisible();
     await expect(page.getByText(/Your account works at all of them/i)).toBeVisible();
   });
+
+  test('verify-otp shows welcome-back when crossing brands (DEL-14)', async ({ page, request }) => {
+    // Signup at pizza-express (creates the tenant_end_users row + a session at
+    // pizza-express via autoSignIn). Then visit burger-heaven /login with the
+    // SAME email — the verify-otp page should server-side detect that:
+    //   - the email exists in this tenant (Hospitality Group)
+    //   - the user has no prior session at burger-heaven (crossed brands)
+    // and render the welcome-back copy per docs/specs/auth-ui.md §5e DEL-14.
+    const email = `del14-${Date.now()}@del14.test`;
+
+    const signup = await request.post(
+      'http://pizza-express.localhost:3001/api/auth/sign-up/email',
+      {
+        data: { email, password: 'test-pass-12chars', name: 'DEL-14 Test' },
+        headers: { Origin: 'http://pizza-express.localhost:3001' },
+      },
+    );
+    expect(signup.status(), `signup body: ${await signup.text()}`).toBe(200);
+
+    // Cross-brand visit: enter the same email at burger-heaven's OTP login.
+    await page.goto('http://burger-heaven.localhost:3001/login');
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByRole('button', { name: /send code/i }).click();
+
+    await expect(page).toHaveURL(/burger-heaven.*\/verify-otp/);
+    await expect(page.getByText(/welcome back/i)).toBeVisible();
+    await expect(page.getByText(/Burger Heaven is part of Hospitality Group/i)).toBeVisible();
+    await expect(page.getByText(/your account works here too/i)).toBeVisible();
+  });
+
+  test('verify-otp shows default copy when same brand as signup (DEL-14)', async ({
+    page,
+    request,
+  }) => {
+    // Negative case: signup at pizza-express, then OTP login at pizza-express
+    // (same brand). The hasUserVisitedBrand check returns true (the signup's
+    // autoSignIn session is at pizza-express), so welcome-back must NOT fire.
+    const email = `del14-same-${Date.now()}@del14.test`;
+
+    const signup = await request.post(
+      'http://pizza-express.localhost:3001/api/auth/sign-up/email',
+      {
+        data: { email, password: 'test-pass-12chars', name: 'DEL-14 Same' },
+        headers: { Origin: 'http://pizza-express.localhost:3001' },
+      },
+    );
+    expect(signup.status(), `signup body: ${await signup.text()}`).toBe(200);
+
+    await page.goto('/login'); // pizza-express baseURL
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByRole('button', { name: /send code/i }).click();
+
+    await expect(page).toHaveURL(/pizza-express.*\/verify-otp/);
+    await expect(page.getByText(/check your email/i)).toBeVisible();
+    await expect(page.getByText(/welcome back/i)).not.toBeVisible();
+  });
 });
 
 test.describe('Tenant isolation', () => {
@@ -71,23 +127,17 @@ test.describe('Tenant isolation', () => {
     const email = `t-${Date.now()}@del8.test`;
 
     // Signup at pizza-express (Hospitality Group tenant)
-    const a = await request.post(
-      'http://pizza-express.localhost:3001/api/auth/sign-up/email',
-      {
-        data: { email, password: 'test-pass-12chars', name: 'A' },
-        headers: { Origin: 'http://pizza-express.localhost:3001' },
-      },
-    );
+    const a = await request.post('http://pizza-express.localhost:3001/api/auth/sign-up/email', {
+      data: { email, password: 'test-pass-12chars', name: 'A' },
+      headers: { Origin: 'http://pizza-express.localhost:3001' },
+    });
     expect(a.status(), `pizza-express signup body: ${await a.text()}`).toBe(200);
 
     // Signup at other-brand-test (Other Co tenant) with SAME email — should succeed
-    const b = await request.post(
-      'http://other-brand-test.localhost:3001/api/auth/sign-up/email',
-      {
-        data: { email, password: 'test-pass-12chars', name: 'B' },
-        headers: { Origin: 'http://other-brand-test.localhost:3001' },
-      },
-    );
+    const b = await request.post('http://other-brand-test.localhost:3001/api/auth/sign-up/email', {
+      data: { email, password: 'test-pass-12chars', name: 'B' },
+      headers: { Origin: 'http://other-brand-test.localhost:3001' },
+    });
     expect(b.status(), `other-brand-test signup body: ${await b.text()}`).toBe(200);
 
     // DB assertion: two distinct rows in tenant_end_users (one per tenant).
