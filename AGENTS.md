@@ -135,17 +135,15 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 > **Linear is the source of truth for what we're working on.** This section mirrors the active project + milestone in Linear at a glance; the canonical state is in Linear. See `docs/linear-workflow.md` for the rules.
 
-Active project: **Phase 1 — Auth Vertical** (Linear, Urgent).
-Active milestone: **M1 — Auth end-to-end**.
-Recently shipped (M1): DEL-7 (auth UI vertical — signup + forgot/reset-password pages on both apps + storefront cross-brand disclosure; expanded scope vs Linear AC; platform invite-accept is two-step signup → verify-email → autoSignIn → dashboard accept-hook; storefront signup is OTP-only with name threaded via ?name= query; invitation-email wiring deferred to follow-up), DEL-6 (password reset + email verification emails — 3 stubs not 4, since storefront uses OTP for verification; shared template chrome extracted; discriminated-union events ready for future storefront email-verify variant), DEL-5 (storefront OTP email via Inngest → Resend — first real transactional send; `@rp/emails` package filled in with pure handler + thin Inngest wrapper; brand-themed React Email template; package-local resolver with tenant-ownership defense-in-depth check), DEL-4 (email delivery architecture), DEL-3 (storefront tenant-scoped adapter — wraps Drizzle adapter, stamps tenant_id/current_brand_id/verification.type on creates, scopes reads on user + verification).
+Active project: **Phase 2 — Food Hall Architecture Alignment** (Linear, Urgent).
+Active milestone: **M1 — Storefront concept + brand-optional auth**.
+Active issue (Todo): **DEL-19 — Introduce first-class `storefronts` table** (additive schema, lowest-risk first step per [ADR-0012](docs/decisions/0012-storefront-brand-tenant-food-hall-architecture.md)).
 
-Open M1 work:
-- DEL-12 — **Done 2026-05-26.** Storefront `tenant_end_user_accounts` tenant scoping shipped; OAuth signup is **unblocked** as of `0002_polite_ego.sql` + `account.additionalFields.tenantId` + `SCOPED_MODELS.has('account')`.
-- DEL-8 — Re-enable E2E in CI (DEL-7 unskipped the cross-brand disclosure spec; tenant-isolation spec still skipped pending multi-tenant seed).
-- DEL-9 — OTP rate limiting (additive).
-- **Follow-ups filed by DEL-7:** invitation-email wiring (BA `sendInvitationEmail` callback + `email.invitation.requested` event/handler/template, same shape as DEL-6); cross-brand "Welcome back!" personalization on `/verify-otp` (auth-spec §10 line 175 copy; requires `checkEmailExistsInTenant` helper).
+Phase 2 plan: [`docs/planning/food-hall-architecture-linear-plan.md`](docs/planning/food-hall-architecture-linear-plan.md) — generalizes the storefront/brand/tenant model to support three modes (single-brand, multi-brand-separate, food hall) with brand on cart/order line items, not on cart/order ownership. M2 = commerce schema (can land parallel to M1's auth work); M3 = food-hall storefront shell live in prd.
 
-Phase 0 (M0) closed 2026-05-25 — DEL-10 / DEL-11 / DEL-1 / DEL-2.
+**Phase 1 — Auth Vertical: closed 2026-05-27.** All 10 acceptance criteria from `docs/auth-spec.md` §6 met in prd. Shipped: DEL-3 (tenant-scoped adapter), DEL-4 (email delivery architecture), DEL-5 (storefront OTP email), DEL-6 (password reset + email verification emails), DEL-7 (auth UI vertical — signup + cross-brand disclosure), DEL-8 (E2E in CI), DEL-9 (OTP rate limiting — 60s window + 15min cooldown via `tenant_otp_lockouts`), DEL-12 (storefront `tenant_end_user_accounts` tenant scoping → OAuth unblocked), DEL-13 (invitation email wiring), DEL-14 (cross-brand "Welcome back!" on /verify-otp), DEL-15 (storefront BA per-brand baseURL), DEL-16 (SEED_ADMIN_PASSWORD smoke infra), DEL-17 (CI Playwright login-redirect fix).
+
+**Phase 0 — Foundation: closed 2026-05-25.** DEL-10 / DEL-11 / DEL-1 / DEL-2.
 
 **Definition of Done (per feature):**
 1. Spec in `docs/specs/<feature>.md` (one page max)
