@@ -1,17 +1,24 @@
-import { extractBrandSlug } from '@/lib/tenant-resolution';
+import { extractStorefrontSlug } from '@/lib/tenant-resolution';
+import { resolveStorefrontBySlug } from '@rp/auth-core/storefront-resolver';
 import { getSessionCookie } from 'better-auth/cookies';
 import { type NextRequest, NextResponse } from 'next/server';
 
 /**
- * Storefront proxy (Next 16, renamed from middleware):
- * 1. Extract brand slug from Host header
- * 2. Inject brand slug as header for downstream
- * 3. Check session for protected routes
+ * Storefront proxy (Next 16, renamed from middleware) — DEL-20.
  *
- * If no valid brand slug → redirect to base domain (marketing site)
- *
- * NOTE: full brand DB lookup happens in server components (cached).
- * Proxy only handles the routing decision based on slug presence.
+ * Order of operations (each step runs before any branching):
+ *   1. Clone request headers and STRIP `x-storefront-*` / `x-brand-slug` —
+ *      the proxy is the sole writer of these. Stripping on every path
+ *      (reserved subdomain, `/api`, no-host, unknown slug, resolved) is
+ *      defense-in-depth against client-supplied spoofing.
+ *   2. Short-circuit `/api`. BA resolves tenant via `host` directly
+ *      (see apps/storefront/src/lib/storefront-tenant-context.ts), not via
+ *      proxy headers. DEL-22 will revisit when BA goes brand-optional.
+ *   3. Extract storefront slug from `Host`. Reserved subdomains short-circuit.
+ *   4. Resolve slug → storefront context via DB. Unknown slug short-circuits.
+ *   5. Inject authoritative `x-storefront-id`, `x-storefront-type`,
+ *      `x-storefront-name`. Inject `x-brand-slug` only when `type='brand'`.
+ *   6. Public/protected path branching unchanged (DEL-17 cookie prefix preserved).
  */
 
 const PUBLIC_PATHS = [
@@ -25,46 +32,52 @@ const PUBLIC_PATHS = [
 
 const PROTECTED_PATHS = ['/account', '/orders'];
 
-export function proxy(request: NextRequest) {
-  const { pathname } = request.nextUrl;
-  const host = request.headers.get('host');
+const PROXY_OWNED_HEADERS = [
+  'x-storefront-id',
+  'x-storefront-type',
+  'x-storefront-name',
+  'x-brand-slug',
+] as const;
 
-  // Always allow API routes
+export async function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  const requestHeaders = new Headers(request.headers);
+  for (const h of PROXY_OWNED_HEADERS) requestHeaders.delete(h);
+
   if (pathname.startsWith('/api')) {
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  const brandSlug = extractBrandSlug(host);
+  const host = request.headers.get('host');
+  const slug = extractStorefrontSlug(host);
 
-  // No valid brand subdomain → redirect to landing
-  if (!brandSlug) {
-    // In production this would redirect to marketing site
-    // In dev, show a helpful error
+  if (!slug) {
     if (pathname === '/') {
       return new NextResponse('No brand specified. Visit {brand-slug}.localhost:3001', {
         status: 200,
       });
     }
-    return NextResponse.next();
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Inject brand slug as a REQUEST header for server components downstream.
-  // Per Next.js docs: NextResponse.next({ request: { headers } }) sets the
-  // upstream request headers — NextResponse.next({ headers }) (no `request:`
-  // wrapper) sets response headers, which the server components can't see.
-  // https://nextjs.org/docs/app/api-reference/file-conventions/proxy#setting-headers
-  const requestHeaders = new Headers(request.headers);
-  requestHeaders.set('x-brand-slug', brandSlug);
+  const ctx = await resolveStorefrontBySlug(slug);
 
-  // Public paths: skip auth, pass through with brand header
+  if (!ctx) {
+    return NextResponse.next({ request: { headers: requestHeaders } });
+  }
+
+  requestHeaders.set('x-storefront-id', ctx.storefrontId);
+  requestHeaders.set('x-storefront-type', ctx.storefrontType);
+  requestHeaders.set('x-storefront-name', ctx.storefrontName);
+  if (ctx.storefrontType === 'brand') {
+    requestHeaders.set('x-brand-slug', slug);
+  }
+
   if (PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Auth check for protected paths. Pass the cookiePrefix storefront BA is
-  // configured with (packages/auth-core/src/storefront.ts → advanced.cookiePrefix);
-  // otherwise getSessionCookie defaults to 'better-auth' and never matches our
-  // cookie, bouncing every authenticated request back to /login?next=... (DEL-17).
   if (PROTECTED_PATHS.some((p) => pathname.startsWith(p))) {
     const sessionCookie = getSessionCookie(request, { cookiePrefix: 'rp_store' });
     if (!sessionCookie) {
