@@ -16,6 +16,19 @@
 
 import type { DBAdapter } from 'better-auth';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Stub @rp/db so the eager `DATABASE_URL` check in `packages/db/src/client.ts`
+// doesn't run during this mock-only test suite. The wrapped adapter pulls in
+// `./rate-limit` (DEL-9), which imports `db` + `tenantOtpLockouts` from
+// `@rp/db`; without this mock, importing the adapter fails at module-load
+// time in CI (no Doppler env). The tests below do NOT exercise the
+// verification.otp_login path, so the mock can be a no-op — none of these
+// fields are read.
+vi.mock('@rp/db', () => ({
+  db: {},
+  tenantOtpLockouts: {},
+}));
+
 import type { ResolveTenantContext, StorefrontTenantContext } from './storefront-adapter';
 import { wrappedStorefrontAdapter } from './storefront-adapter';
 
