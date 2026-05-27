@@ -5,6 +5,14 @@ import { MenuItemCard } from './menu-item-card';
 
 type MenuViewProps = {
   brandId: string;
+  /**
+   * The page path the menu is being rendered at. Forwarded to each
+   * `<MenuItemCard>` (and ultimately to `<AddToCartButton>`) so the
+   * cart server action can compose the auth-redirect `next=` URL and
+   * revalidate the right page on a successful add. Examples: `/` for
+   * mode 1/2 brand-host home, `/b/<slug>` for mode 3 brand subsection.
+   */
+  currentPath: string;
 };
 
 /**
@@ -16,7 +24,7 @@ type MenuViewProps = {
  *
  * DEL-25 / docs/specs/food-hall-storefront.md.
  */
-export async function MenuView({ brandId }: MenuViewProps) {
+export async function MenuView({ brandId, currentPath }: MenuViewProps) {
   // Load active menus for this brand.
   const brandMenus = await db
     .select({
@@ -87,9 +95,11 @@ export async function MenuView({ brandId }: MenuViewProps) {
             {(itemsByMenu.get(m.id) ?? []).map((item) => (
               <MenuItemCard
                 key={item.id}
+                menuItemId={item.id}
                 name={item.name}
                 description={item.description}
                 priceCents={item.priceCents}
+                currentPath={currentPath}
               />
             ))}
           </div>
