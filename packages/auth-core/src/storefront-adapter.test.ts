@@ -197,6 +197,31 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
     expect(call?.tenantId).toBeUndefined();
   });
 
+  it('session.create stamps currentBrandId NULL for tenant-mode sessions (DEL-21)', async () => {
+    const inner = makeInner();
+    // Tenant-mode resolver: no brandId key. Unreachable in production until
+    // DEL-22 flips the BA tenant resolver based on storefrontType, but the
+    // optional `StorefrontTenantContext.brandId` lets us exercise the adapter
+    // branch today.
+    const tenantModeResolver: ResolveTenantContext = vi.fn(async () => ({
+      tenantId: TENANT_ID,
+      brandSlug: BRAND_SLUG,
+    }));
+    const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, tenantModeResolver);
+
+    await wrapped.create({
+      model: 'session',
+      data: { token: 'sess-tenant', tenantEndUserId: 'u-1' },
+    });
+
+    const call = inner.create.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    // Explicit `.toBe(null)` — guards against a future "cleanup" that
+    // replaces the explicit `?? null` with a conditional spread, which would
+    // silently regress the tenant-mode invariant.
+    expect(call?.currentBrandId).toBe(null);
+    expect(call?.tenantId).toBeUndefined();
+  });
+
   it('session.findOne (by token) does NOT get a tenantId predicate', async () => {
     const inner = makeInner();
     const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, resolver());

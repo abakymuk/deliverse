@@ -675,11 +675,11 @@ export const tenantEndUserSessions = pgTable('tenant_end_user_sessions', {
     .notNull()
     .references(() => tenantEndUsers.id, { onDelete: 'cascade' }),
 
-  // Which brand this session was authenticated through.
-  // Used for theming, brand-specific UI, audit ("user shopped at Pizza Express")
-  currentBrandId: uuid('current_brand_id')
-    .notNull()
-    .references(() => brands.id, { onDelete: 'cascade' }),
+  // The brand this session was authenticated through, when applicable.
+  // NULL for food-hall (tenant-mode) sessions per ADR-0012 §"Session model
+  // (target)" / DEL-21. Used for theming, brand-specific UI, and audit
+  // ("user shopped at Pizza Express") when a brand context exists.
+  currentBrandId: uuid('current_brand_id').references(() => brands.id, { onDelete: 'cascade' }),
 
   token: text('token').notNull(),
   expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
