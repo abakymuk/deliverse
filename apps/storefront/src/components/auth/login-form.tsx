@@ -187,7 +187,6 @@ function PasswordForm({
   next: string;
   onToggleMode: () => void;
 }) {
-  const router = useRouter();
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const {
@@ -205,6 +204,7 @@ function PasswordForm({
       const result = await signIn.email({
         email: values.email,
         password: values.password,
+        callbackURL: next,
       });
 
       if (result.error) {
@@ -214,7 +214,9 @@ function PasswordForm({
         return;
       }
 
-      router.push(next as Route);
+      // BA's redirect plugin handles navigation via window.location.href on
+      // success — see DEL-17 note in platform login-form.tsx for the cookie-
+      // persistence rationale.
     } catch (err) {
       setError('root', {
         message: err instanceof Error ? err.message : 'Unknown error',
