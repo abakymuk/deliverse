@@ -19,11 +19,13 @@
 
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Route } from 'next';
-import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 import type { Brand } from '@rp/db';
+import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { Button } from '@rp/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import {
@@ -49,6 +51,17 @@ export type SignupFormProps = {
 
 export function SignupForm({ brand }: SignupFormProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawNext = searchParams.get('next');
+  const next = safeNextPath(rawNext, '/account');
+
+  // Propagate the explicit `next` back to /login if the user came here from a
+  // deep-link redirect (e.g., /login?next=/checkout → /signup?next=/checkout
+  // → /login?next=/checkout). When no `next` was supplied, the /login link
+  // stays plain.
+  const loginHref = (
+    rawNext ? `/login?next=${encodeURIComponent(next)}` : '/login'
+  ) as Route;
 
   const {
     control,
@@ -75,7 +88,7 @@ export function SignupForm({ brand }: SignupFormProps) {
       const params = new URLSearchParams({
         email: values.email,
         name: values.name,
-        next: '/account',
+        next,
         signup: 'true',
       });
       router.push(`/verify-otp?${params.toString()}` as Route);
@@ -146,9 +159,9 @@ export function SignupForm({ brand }: SignupFormProps) {
               </Button>
               <FieldDescription className="text-center">
                 Already have an account?{' '}
-                <a href="/login" className="underline-offset-4 hover:underline">
+                <Link href={loginHref} className="underline-offset-4 hover:underline">
                   Sign in
-                </a>
+                </Link>
               </FieldDescription>
             </Field>
           </FieldGroup>

@@ -51,7 +51,18 @@ type Mode = 'otp' | 'password';
 export function LoginForm() {
   const [mode, setMode] = useState<Mode>('otp');
   const searchParams = useSearchParams();
-  const next = safeNextPath(searchParams.get('next'), '/account');
+  const rawNext = searchParams.get('next');
+  const next = safeNextPath(rawNext, '/account');
+
+  // Propagate `next` to /signup so the chain preserves the user's intent
+  // (e.g., /login?next=/checkout → /signup?next=/checkout). We only append
+  // when the user explicitly supplied a `next` param — empty/unsafe values
+  // already fell back to the default and don't need to be propagated.
+  // /forgot-password is intentionally skipped — that form doesn't consume
+  // `next` today, so propagating would create dead UX.
+  const signupHref = (
+    rawNext ? `/signup?next=${encodeURIComponent(next)}` : '/signup'
+  ) as Route;
 
   function toggleMode() {
     setMode((m) => (m === 'otp' ? 'password' : 'otp'));
@@ -67,9 +78,14 @@ export function LoginForm() {
       </CardHeader>
       <CardContent>
         {mode === 'otp' ? (
-          <OtpForm key="otp" next={next} onToggleMode={toggleMode} />
+          <OtpForm key="otp" next={next} signupHref={signupHref} onToggleMode={toggleMode} />
         ) : (
-          <PasswordForm key="password" next={next} onToggleMode={toggleMode} />
+          <PasswordForm
+            key="password"
+            next={next}
+            signupHref={signupHref}
+            onToggleMode={toggleMode}
+          />
         )}
       </CardContent>
     </Card>
@@ -78,9 +94,11 @@ export function LoginForm() {
 
 function OtpForm({
   next,
+  signupHref,
   onToggleMode,
 }: {
   next: string;
+  signupHref: Route;
   onToggleMode: () => void;
 }) {
   const router = useRouter();
@@ -121,7 +139,22 @@ function OtpForm({
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
-    await signIn.social({ provider: 'google', callbackURL: next });
+    try {
+      const result = await signIn.social({ provider: 'google', callbackURL: next });
+      if (result?.error) {
+        setError('root', {
+          message: result.error.message ?? 'Google sign-in failed',
+        });
+      }
+    } catch (err) {
+      setError('root', {
+        message: err instanceof Error ? err.message : 'Google sign-in failed',
+      });
+    } finally {
+      // Reset loading on error/cancel paths that don't redirect. Without
+      // `finally`, an unsuccessful social flow leaves the button stuck.
+      setGoogleLoading(false);
+    }
   }
 
   return (
@@ -170,7 +203,7 @@ function OtpForm({
           </Button>
           <FieldDescription className="text-center">
             Don&apos;t have an account?{' '}
-            <Link href={'/signup' as Route} className="underline">
+            <Link href={signupHref} className="underline">
               Sign up
             </Link>
           </FieldDescription>
@@ -182,9 +215,11 @@ function OtpForm({
 
 function PasswordForm({
   next,
+  signupHref,
   onToggleMode,
 }: {
   next: string;
+  signupHref: Route;
   onToggleMode: () => void;
 }) {
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -209,7 +244,7 @@ function PasswordForm({
 
       if (result.error) {
         setError('root', {
-          message: result.error.message ?? 'Login failed',
+          message: result.error.message ?? 'Sign-in failed',
         });
         return;
       }
@@ -226,7 +261,22 @@ function PasswordForm({
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
-    await signIn.social({ provider: 'google', callbackURL: next });
+    try {
+      const result = await signIn.social({ provider: 'google', callbackURL: next });
+      if (result?.error) {
+        setError('root', {
+          message: result.error.message ?? 'Google sign-in failed',
+        });
+      }
+    } catch (err) {
+      setError('root', {
+        message: err instanceof Error ? err.message : 'Google sign-in failed',
+      });
+    } finally {
+      // Reset loading on error/cancel paths that don't redirect. Without
+      // `finally`, an unsuccessful social flow leaves the button stuck.
+      setGoogleLoading(false);
+    }
   }
 
   return (
@@ -287,7 +337,7 @@ function PasswordForm({
 
         <Field>
           <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Signing in…' : 'Login'}
+            {isSubmitting ? 'Signing in…' : 'Sign in'}
           </Button>
           <Button type="button" variant="link" onClick={onToggleMode}>
             Sign in with a code instead
@@ -302,7 +352,7 @@ function PasswordForm({
           </Button>
           <FieldDescription className="text-center">
             Don&apos;t have an account?{' '}
-            <Link href={'/signup' as Route} className="underline">
+            <Link href={signupHref} className="underline">
               Sign up
             </Link>
           </FieldDescription>
