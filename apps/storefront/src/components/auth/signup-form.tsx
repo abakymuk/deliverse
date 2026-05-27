@@ -46,10 +46,21 @@ const signupSchema = z.object({
 type SignupValues = z.infer<typeof signupSchema>;
 
 export type SignupFormProps = {
-  brand: Brand;
+  /**
+   * Brand-host context (mode 1/2). When set, the form heading is
+   * "Create your {brand.name} account."
+   */
+  brand?: Brand;
+  /**
+   * Tenant-host context (mode 3 — food-hall). DEL-25 PR 25b. Used as
+   * the heading when no `brand` is supplied. Either `brand` or
+   * `storefrontName` should be set; if both are omitted, heading falls
+   * back to a generic "Create your account".
+   */
+  storefrontName?: string;
 };
 
-export function SignupForm({ brand }: SignupFormProps) {
+export function SignupForm({ brand, storefrontName }: SignupFormProps = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawNext = searchParams.get('next');
@@ -102,7 +113,9 @@ export function SignupForm({ brand }: SignupFormProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Create your {brand.name} account</CardTitle>
+        <CardTitle>
+          Create your {brand?.name ?? storefrontName ?? ''} account
+        </CardTitle>
         <CardDescription>We&apos;ll send a 6-digit code to verify your email.</CardDescription>
       </CardHeader>
       <CardContent>
