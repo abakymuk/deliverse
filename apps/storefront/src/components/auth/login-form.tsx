@@ -121,7 +121,22 @@ function OtpForm({
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
-    await signIn.social({ provider: 'google', callbackURL: next });
+    try {
+      const result = await signIn.social({ provider: 'google', callbackURL: next });
+      if (result?.error) {
+        setError('root', {
+          message: result.error.message ?? 'Google sign-in failed',
+        });
+      }
+    } catch (err) {
+      setError('root', {
+        message: err instanceof Error ? err.message : 'Google sign-in failed',
+      });
+    } finally {
+      // DEL-23: reset loading state on error/cancel paths that don't redirect.
+      // Without `finally`, an unsuccessful social flow leaves the button stuck.
+      setGoogleLoading(false);
+    }
   }
 
   return (
@@ -226,7 +241,22 @@ function PasswordForm({
 
   async function handleGoogleLogin() {
     setGoogleLoading(true);
-    await signIn.social({ provider: 'google', callbackURL: next });
+    try {
+      const result = await signIn.social({ provider: 'google', callbackURL: next });
+      if (result?.error) {
+        setError('root', {
+          message: result.error.message ?? 'Google sign-in failed',
+        });
+      }
+    } catch (err) {
+      setError('root', {
+        message: err instanceof Error ? err.message : 'Google sign-in failed',
+      });
+    } finally {
+      // DEL-23: reset loading state on error/cancel paths that don't redirect.
+      // Without `finally`, an unsuccessful social flow leaves the button stuck.
+      setGoogleLoading(false);
+    }
   }
 
   return (
