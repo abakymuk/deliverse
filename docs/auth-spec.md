@@ -70,6 +70,8 @@ packages/
 
 **Why two apps:** security boundary = network boundary. Cookies on `admin.*` cannot leak to `*.deliverse.app` storefronts by design. Cannot be undone by a bug in an `if` statement.
 
+**Storefront mode is brand-required today** ([ADR-0010](./decisions/0010-tenant-scoping-injection.md)); [ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md) defines the **target brand-optional model** that adds tenant-level food-hall storefronts as a first-class concept. The acceptance criteria in §6 and the data model in §8 describe current-state behavior; the target-state shape is captured in ADR-0012.
+
 ## 6. Acceptance Criteria
 
 1. End user `john@x.com` can have separate accounts at tenant A and tenant B. Sessions and logins on one do not affect the other.

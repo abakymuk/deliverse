@@ -11,6 +11,8 @@ Customer-facing storefront for restaurant guests.
 - Audience: end users / guests
 - Auth: Better-Auth instance #2, email OTP (primary) + password + Google OAuth
 
+> **Target architecture.** The `{brand}.deliverse.app` routing and brand-anchored sessions described below are the M1 implementation. [ADR-0012](../../docs/decisions/0012-storefront-brand-tenant-food-hall-architecture.md) sets the target where storefronts are a first-class concept (`type='brand' | 'tenant'`), `current_brand_id` becomes optional for tenant-level food-hall sessions, and BA tenant context is brand-optional. Mode 3 (food hall) is not yet implemented — see [`docs/planning/food-hall-architecture-linear-plan.md`](../../docs/planning/food-hall-architecture-linear-plan.md).
+
 ## Critical: tenant resolution
 
 Every request goes through `src/proxy.ts` which:
