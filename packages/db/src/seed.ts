@@ -23,6 +23,7 @@ import {
   locations,
   platformAccounts,
   platformUsers,
+  storefronts,
   tenantMemberships,
   tenants,
 } from './schema';
@@ -203,8 +204,35 @@ async function seed() {
       target: [locationBrands.locationId, locationBrands.brandId],
     });
 
+  // === Storefronts (DEL-19) ===
+  // One brand storefront per seeded brand; type='brand', primary_brand_id set.
+  // Partial unique on slug WHERE deleted_at IS NULL.
+  await db
+    .insert(storefronts)
+    .values([
+      {
+        tenantId: tenant.id,
+        slug: BRAND_PIZZA_SLUG,
+        name: BRAND_PIZZA_NAME,
+        type: 'brand',
+        primaryBrandId: pizza.id,
+        brandingJson: {},
+        isActive: true,
+      },
+      {
+        tenantId: tenant.id,
+        slug: BRAND_BURGER_SLUG,
+        name: BRAND_BURGER_NAME,
+        type: 'brand',
+        primaryBrandId: burger.id,
+        brandingJson: {},
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing();
+
   console.info(
-    `Seeded admin=${ADMIN_EMAIL} (${admin.id}), tenant=${TENANT_SLUG} (${tenant.id}), brands=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], locations=[Downtown, Eastside]`,
+    `Seeded admin=${ADMIN_EMAIL} (${admin.id}), tenant=${TENANT_SLUG} (${tenant.id}), brands=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], locations=[Downtown, Eastside], storefronts=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}]`,
   );
 
   // === Test-only fixtures (DEL-8) ===
@@ -239,8 +267,38 @@ async function seed() {
         })
         .onConflictDoNothing();
 
+      // DEL-19: read back the test brand id, then seed its storefront row.
+      // The brand insert above is `onConflictDoNothing`, so we can't rely on
+      // `RETURNING` — same read-back pattern as the canonical brands above.
+      const [otherBrand] = await db
+        .select({ id: brands.id })
+        .from(brands)
+        .where(
+          and(
+            eq(brands.tenantId, otherTenant.id),
+            eq(brands.slug, 'other-brand-test'),
+            isNull(brands.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (otherBrand) {
+        await db
+          .insert(storefronts)
+          .values({
+            tenantId: otherTenant.id,
+            slug: 'other-brand-test',
+            name: 'Other Brand (Test)',
+            type: 'brand',
+            primaryBrandId: otherBrand.id,
+            brandingJson: {},
+            isActive: true,
+          })
+          .onConflictDoNothing();
+      }
+
       console.info(
-        `Seeded test fixtures: tenant=other-co-test (${otherTenant.id}), brand=other-brand-test`,
+        `Seeded test fixtures: tenant=other-co-test (${otherTenant.id}), brand=other-brand-test, storefront=other-brand-test`,
       );
     }
   }
