@@ -155,6 +155,8 @@ Phase 0 (M0) closed 2026-05-25 — DEL-10 / DEL-11 / DEL-1 / DEL-2.
 5. Integration tests for critical paths
 6. AGENTS.md updated if conventions changed
 
+**Running auth-gated smokes against stg/prd:** see [`docs/smoke-credentials.md`](docs/smoke-credentials.md) — covers the `SEED_ADMIN_PASSWORD` lookup, BA's CSRF `Origin` header requirement, Inngest indexing-delay polling pattern, and canonical 3-step recipes for the platform invite + storefront signup flows.
+
 ---
 
 ## Gotchas (real ones, learned the hard way)
