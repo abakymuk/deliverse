@@ -153,6 +153,7 @@ function OtpForm({
     } finally {
       // Reset loading on error/cancel paths that don't redirect. Without
       // `finally`, an unsuccessful social flow leaves the button stuck.
+      // (Fix originally landed in DEL-23 / PR #57.)
       setGoogleLoading(false);
     }
   }
@@ -275,6 +276,7 @@ function PasswordForm({
     } finally {
       // Reset loading on error/cancel paths that don't redirect. Without
       // `finally`, an unsuccessful social flow leaves the button stuck.
+      // (Fix originally landed in DEL-23 / PR #57.)
       setGoogleLoading(false);
     }
   }
