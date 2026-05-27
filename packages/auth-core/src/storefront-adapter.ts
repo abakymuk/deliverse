@@ -34,19 +34,37 @@ import { deriveVerificationType } from './storefront-verification-type';
 export type StorefrontTenantContext = {
   tenantId: string;
   /**
+   * Storefront row UUID (DEL-22). Always present. Identifies the matched
+   * `storefronts` row regardless of brand vs tenant type per ADR-0012.
+   */
+  storefrontId: string;
+  /**
+   * Storefront type discriminator (DEL-22). 'brand' for traditional brand
+   * subdomains (storefront 1:1 with a brand); 'tenant' for food-hall
+   * storefronts where one storefront curates multiple brands. ADR-0012.
+   */
+  storefrontType: 'brand' | 'tenant';
+  /**
+   * Subdomain we matched on `Host`. Always present. For `storefrontType==='brand'`
+   * this equals `brandSlug` (DEL-19 backfill made `storefronts.slug === brands.slug`
+   * for brand-type storefronts). For `storefrontType==='tenant'` this is the
+   * food-hall slug (e.g., 'oomi-kitchen').
+   */
+  storefrontSlug: string;
+  /**
    * Brand UUID when the host resolved to `storefrontType='brand'`; `undefined`
-   * for tenant-mode (food-hall) sessions per ADR-0012 / DEL-21. The resolver
-   * remains brand-required until DEL-22 flips it; the optional shape unlocks
-   * the unit-test branch today.
+   * for tenant-mode (food-hall) sessions per ADR-0012.
    */
   brandId?: string;
   /**
-   * Brand subdomain slug, e.g. 'pizza-express'. Added in DEL-5 so the storefront
-   * OTP callback can compose Inngest event payloads without a second DB lookup.
-   * The adapter wrapper itself does NOT read this field — it scopes writes by
-   * `tenantId`/`brandId` only. Consumer-only.
+   * Brand subdomain slug, e.g. 'pizza-express'. Present iff
+   * `storefrontType === 'brand'`; identical to `storefrontSlug` in that mode.
+   * Added in DEL-5 so the storefront OTP callback can compose Inngest event
+   * payloads without a second DB lookup. The adapter wrapper itself does NOT
+   * read this field — it scopes writes by `tenantId`/`brandId` only.
+   * Consumer-only.
    */
-  brandSlug: string;
+  brandSlug?: string;
 };
 
 export type ResolveTenantContext = () => Promise<StorefrontTenantContext>;
@@ -130,7 +148,11 @@ function wrapMethods(
           data: {
             ...data,
             tenantId: ctx.tenantId,
-            brandId: ctx.brandId, // DEL-23: tighten with ?? null + tenant-default email-branding fallback
+            // DEL-22: stamp brand_id only when brand context present
+            // (mirrors session-create's `?? null` pattern from DEL-21).
+            // Tenant-host verifications get NULL. Email-branding fallback
+            // (storefront.brandingJson, tenant.name/logo) lives in @rp/emails.
+            brandId: ctx.brandId ?? null,
             type,
           },
           select,

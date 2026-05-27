@@ -1,8 +1,12 @@
 /**
  * Unit tests for `rewriteStorefrontEmailUrl` — the DEL-15 storefront BA
- * reset-URL origin rewriter.
+ * reset-URL origin rewriter, updated for DEL-22's brand-optional shape.
+ *
+ * DEL-22 renamed the input field `brandSlug` → `storefrontSlug` (same logic;
+ * semantic shift to cover both brand-host and tenant-host storefronts).
  *
  * Spec: docs/specs/del-15-storefront-baseurl.md §Acceptance Criteria.
+ * Spec: docs/specs/ba-brand-optional.md (DEL-22).
  */
 
 import { describe, expect, it } from 'vitest';
@@ -18,7 +22,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('rewrites origin to pizza-express subdomain', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_DEV_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'localhost:3001',
         proto: 'http',
       });
@@ -30,7 +34,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('rewrites origin to burger-heaven subdomain (multi-tenant)', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_DEV_URL,
-        brandSlug: 'burger-heaven',
+        storefrontSlug: 'burger-heaven',
         baseDomain: 'localhost:3001',
         proto: 'http',
       });
@@ -44,7 +48,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('rewrites origin to pizza-express.staging subdomain', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_PRD_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'staging.deliverse.app',
         proto: 'https',
       });
@@ -58,7 +62,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('rewrites origin to pizza-express.deliverse.app', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_PRD_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'deliverse.app',
         proto: 'https',
       });
@@ -70,7 +74,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('rewrites origin to burger-heaven.deliverse.app (multi-tenant)', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_PRD_URL,
-        brandSlug: 'burger-heaven',
+        storefrontSlug: 'burger-heaven',
         baseDomain: 'deliverse.app',
         proto: 'https',
       });
@@ -85,7 +89,7 @@ describe('rewriteStorefrontEmailUrl', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl:
           'http://localhost:3000/reset-password/UNIQUE-TOKEN-VALUE?callbackURL=%2Freset-password',
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'localhost:3001',
         proto: 'http',
       });
@@ -95,7 +99,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('keeps the callbackURL query value (already URI-encoded)', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: 'http://localhost:3000/reset-password/abc?callbackURL=%2Freset-password',
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'localhost:3001',
         proto: 'http',
       });
@@ -105,7 +109,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('preserves arbitrary additional query params (forward-compat)', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: 'http://localhost:3000/reset-password/abc?callbackURL=%2Fx&extra=42',
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'localhost:3001',
         proto: 'http',
       });
@@ -115,11 +119,37 @@ describe('rewriteStorefrontEmailUrl', () => {
     });
   });
 
+  describe('tenant-mode storefront slug (DEL-22)', () => {
+    it('rewrites origin to tenant-storefront subdomain on dev', () => {
+      const result = rewriteStorefrontEmailUrl({
+        originalUrl: BA_DEV_URL,
+        storefrontSlug: 'oomi-kitchen-test',
+        baseDomain: 'localhost:3001',
+        proto: 'http',
+      });
+      expect(result).toBe(
+        'http://oomi-kitchen-test.localhost:3001/reset-password/abc123def456?callbackURL=%2Freset-password',
+      );
+    });
+
+    it('rewrites origin to tenant-storefront subdomain on prd', () => {
+      const result = rewriteStorefrontEmailUrl({
+        originalUrl: BA_PRD_URL,
+        storefrontSlug: 'oomi-kitchen',
+        baseDomain: 'deliverse.app',
+        proto: 'https',
+      });
+      expect(result).toBe(
+        'https://oomi-kitchen.deliverse.app/reset-password/abc123def456?callbackURL=%2Freset-password',
+      );
+    });
+  });
+
   describe('baseDomain parsing tolerance', () => {
     it('strips an http:// scheme prefix from baseDomain (Doppler historical)', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_DEV_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'http://localhost:3001',
         proto: 'http',
       });
@@ -129,7 +159,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('strips an https:// scheme prefix from baseDomain', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_PRD_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'https://deliverse.app',
         proto: 'https',
       });
@@ -139,7 +169,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('strips a trailing path/slash from baseDomain', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_PRD_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'deliverse.app/',
         proto: 'https',
       });
@@ -149,7 +179,7 @@ describe('rewriteStorefrontEmailUrl', () => {
     it('lowercases the baseDomain', () => {
       const result = rewriteStorefrontEmailUrl({
         originalUrl: BA_PRD_URL,
-        brandSlug: 'pizza-express',
+        storefrontSlug: 'pizza-express',
         baseDomain: 'Deliverse.App',
         proto: 'https',
       });

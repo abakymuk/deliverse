@@ -1,7 +1,13 @@
 import { expect, test } from '@playwright/test';
 import { db } from '@rp/db';
-import { storefronts, tenants } from '@rp/db/schema';
-import { and, eq, isNull } from 'drizzle-orm';
+import {
+  storefronts,
+  tenantEndUserSessions,
+  tenantEndUserVerifications,
+  tenantEndUsers,
+  tenants,
+} from '@rp/db/schema';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 
 /**
  * DEL-20 — Storefront-aware host resolution.
@@ -128,5 +134,99 @@ test.describe
         },
       });
       expect(res.status()).toBe(404);
+    });
+
+    // ── DEL-22 tenant-host auth flows ──────────────────────────────────────
+    //
+    // These three tests share a single test-scoped user (created in test 7's
+    // signup, exercised by tests 8 and 9). They assert HTTP 200 + DB effects
+    // only — Inngest event payload shape is covered by `@rp/emails` unit tests.
+    // The OOMI Kitchen Test fixture from `beforeAll` is the storefront these
+    // requests resolve to.
+
+    const tenantUserEmail = `del22-tenant-${Date.now()}@smoke.local`;
+    const tenantUserPassword = 'tenant-pass-12chars';
+    const oomiOrigin = `http://${OOMI_STOREFRONT_SLUG}.localhost:${STOREFRONT_PORT}`;
+    let tenantEndUserId: string;
+
+    test('7. tenant-host password signup creates user + session with currentBrandId NULL (DEL-22)', async ({
+      request,
+    }) => {
+      const res = await request.post(urlFor(OOMI_STOREFRONT_SLUG, '/api/auth/sign-up/email'), {
+        data: { name: 'DEL-22 tenant smoke', email: tenantUserEmail, password: tenantUserPassword },
+        headers: { Origin: oomiOrigin },
+      });
+      expect(res.status(), `tenant-host signup body: ${await res.text()}`).toBe(200);
+
+      const [user] = await db
+        .select({ id: tenantEndUsers.id, tenantId: tenantEndUsers.tenantId })
+        .from(tenantEndUsers)
+        .where(and(eq(tenantEndUsers.email, tenantUserEmail), isNull(tenantEndUsers.deletedAt)))
+        .limit(1);
+      if (!user) throw new Error(`user row not written for ${tenantUserEmail}`);
+      expect(user.tenantId).toBe(oomiTenantId);
+      tenantEndUserId = user.id;
+
+      const [session] = await db
+        .select({ currentBrandId: tenantEndUserSessions.currentBrandId })
+        .from(tenantEndUserSessions)
+        .where(eq(tenantEndUserSessions.tenantEndUserId, user.id))
+        .orderBy(desc(tenantEndUserSessions.createdAt))
+        .limit(1);
+      if (!session) throw new Error('session row not written for tenant-host signup');
+      // DEL-22 + DEL-21: tenant-host sessions stamp NULL.
+      expect(session.currentBrandId).toBeNull();
+    });
+
+    test('8. tenant-host OTP request writes verification row with brandId NULL (DEL-22)', async ({
+      request,
+    }) => {
+      if (!tenantEndUserId) {
+        throw new Error('test 7 must run before test 8 — describe.serial is required');
+      }
+      const res = await request.post(
+        urlFor(OOMI_STOREFRONT_SLUG, '/api/auth/email-otp/send-verification-otp'),
+        {
+          data: { email: tenantUserEmail, type: 'sign-in' },
+          headers: { Origin: oomiOrigin },
+        },
+      );
+      expect(res.status(), `tenant-host OTP body: ${await res.text()}`).toBe(200);
+
+      const [verification] = await db
+        .select({
+          tenantId: tenantEndUserVerifications.tenantId,
+          brandId: tenantEndUserVerifications.brandId,
+        })
+        .from(tenantEndUserVerifications)
+        .where(eq(tenantEndUserVerifications.identifier, `sign-in-otp-${tenantUserEmail}`))
+        .orderBy(desc(tenantEndUserVerifications.createdAt))
+        .limit(1);
+      if (!verification) throw new Error('verification row not written for tenant-host OTP');
+      expect(verification.tenantId).toBe(oomiTenantId);
+      // DEL-22 adapter `ctx.brandId ?? null` — tenant-host verifications stamp NULL.
+      expect(verification.brandId).toBeNull();
+    });
+
+    test('9. tenant-host password reset request returns 200 for existing user (DEL-22)', async ({
+      request,
+    }) => {
+      if (!tenantEndUserId) {
+        throw new Error('test 7 must run before test 9 — describe.serial is required');
+      }
+      // BA 1.6.x exposes the sendResetPassword callback via `/request-password-reset`
+      // (verified at node_modules/better-auth/.../api/routes/password.mjs:20).
+      const res = await request.post(urlFor(OOMI_STOREFRONT_SLUG, '/api/auth/request-password-reset'), {
+        data: {
+          email: tenantUserEmail,
+          redirectTo: `${oomiOrigin}/reset-password`,
+        },
+        headers: { Origin: oomiOrigin },
+      });
+      expect(res.status(), `tenant-host password-reset body: ${await res.text()}`).toBe(200);
+      // The Inngest event payload (mode: 'tenant', storefrontId/storefrontSlug)
+      // and the URL rewrite to oomi-kitchen-test.* are covered by @rp/emails
+      // unit tests. This e2e asserts the callback executes without throwing
+      // — i.e., the resolver doesn't 400 on absent brandId (AC#4).
     });
   });
