@@ -38,9 +38,21 @@ jobs:
           DOPPLER_PROJECT: deliverse
           DOPPLER_CONFIG: prd
 
-      - name: Verify migration succeeded
+      # Seed is idempotent (`onConflictDoNothing` + targeted UPDATEs for
+      # name convergence per DEL-25). Running on every deploy keeps the
+      # canonical dataset in prd in sync with seed.ts. Test fixtures
+      # (SEED_TEST_FIXTURES) are intentionally NEVER enabled in prd — the
+      # multi-brand cart fixture + secondary `other-co-test` tenant are
+      # dev/CI only.
+      - name: Seed production DB
+        run: doppler run --token=${{ secrets.DOPPLER_TOKEN_PRD }} -- pnpm db:seed
+        env:
+          DOPPLER_PROJECT: deliverse
+          DOPPLER_CONFIG: prd
+
+      - name: Verify migration + seed succeeded
         run: |
-          echo "Migration job complete. If this step is reached, all migrations applied successfully."
+          echo "Migration + seed job complete. If this step is reached, both applied successfully."
 
   deploy-platform:
     name: Deploy platform to production
