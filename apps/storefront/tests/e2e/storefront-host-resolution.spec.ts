@@ -7,7 +7,7 @@ import {
   tenantEndUsers,
   tenants,
 } from '@rp/db/schema';
-import { and, desc, eq, isNull } from 'drizzle-orm';
+import { and, desc, eq, isNull, like } from 'drizzle-orm';
 
 /**
  * DEL-20 / DEL-22 / DEL-23 — Storefront-aware host resolution + tenant-host auth.
@@ -24,12 +24,13 @@ import { and, desc, eq, isNull } from 'drizzle-orm';
  *   - 10: tenant-host password reset → 200 (Inngest payload + URL rewrite
  *         covered by @rp/emails unit tests).
  *
- * Fixture: this suite creates an OOMI Kitchen Test tenant + type='tenant'
- * storefront in beforeAll and deletes the tenant (cascading the storefront +
- * any users created during the auth flow tests) in afterAll. The canonical
- * seed.ts is intentionally NOT modified — fixture lifecycle lives here,
- * slug `-test` suffixed to avoid collision with any future real OOMI
- * Kitchen seeded via DEL-25.
+ * Fixture: DEL-25 promoted `oomi-kitchen-test` to canonical seed (it's the
+ * food-hall demo tenant). The `beforeAll` block here is defensive — its
+ * inserts are `onConflictDoNothing` so they no-op when canonical seed has
+ * already provisioned OOMI Kitchen, and they fully seed OOMI if (for any
+ * reason) the canonical seed wasn't run. `afterAll` no longer cascade-
+ * deletes the tenant (that would wipe canonical seed data); it does a
+ * targeted cleanup of just the tenant_end_users created by tests 7-10.
  *
  * Specs:
  *   - docs/specs/storefront-host-resolution.md  (DEL-20)
@@ -144,8 +145,18 @@ test.describe
     });
 
     test.afterAll(async () => {
-      // Cascade deletes the storefront via FK ON DELETE CASCADE on tenant_id.
-      await db.delete(tenants).where(eq(tenants.id, oomiTenantId));
+      // DEL-25: do NOT cascade-delete the OOMI tenant — it's canonical seed
+      // data now. Cleanup is targeted to just the tenant_end_users created
+      // by tests 7-10 (they own the `@smoke.local` email suffix). Session +
+      // verification rows cascade off the user via FK ON DELETE CASCADE.
+      await db
+        .delete(tenantEndUsers)
+        .where(
+          and(
+            eq(tenantEndUsers.tenantId, oomiTenantId),
+            like(tenantEndUsers.email, '%@smoke.local'),
+          ),
+        );
     });
 
     test('1. brand host renders existing home with brand heading (AC#5)', async ({
@@ -157,15 +168,23 @@ test.describe
       expect(body).toContain('Pizza Express');
     });
 
-    test('2. tenant host renders food-hall stub with storefront name (AC#6)', async ({
+    test('2. tenant host renders food-hall directory with brand cards (DEL-25)', async ({
       request,
     }) => {
+      // DEL-25 replaced the food-hall stub with a brand directory. The
+      // OOMI tenant's canonical seed includes OOMI Burger + OOMI Pizza
+      // brands served by the `oomi-kitchen` location; both cards should
+      // render. "OOMI Kitchen" substring matches both the canonical
+      // em-dash name ("OOMI Kitchen — Test") and the test fixture's
+      // plain name ("OOMI Kitchen Test") — defensive against which one
+      // populated the storefront row first.
       const res = await request.get(urlFor(OOMI_STOREFRONT_SLUG, '/'));
       expect(res.status()).toBe(200);
       const body = await res.text();
-      expect(body).toContain('OOMI Kitchen Test');
-      expect(body).toContain('Food hall');
-      expect(body).toContain('coming soon');
+      expect(body).toContain('OOMI Kitchen');
+      expect(body).toContain('Choose a brand to start your order');
+      expect(body).toContain('OOMI Burger');
+      expect(body).toContain('OOMI Pizza');
     });
 
     test('3. reserved subdomain bypasses storefront resolution (AC#7)', async ({ request }) => {
@@ -193,7 +212,9 @@ test.describe
       const body = await res.text();
       expect(body).toContain('Pizza Express');
       expect(body).not.toContain('Evil Hall');
-      expect(body).not.toContain('Food hall');
+      // DEL-25 replaced the food-hall stub with a directory; the new
+      // tenant-mode UI signal is the "Choose a brand" intro copy.
+      expect(body).not.toContain('Choose a brand to start your order');
     });
 
     test('6. unknown-host header-spoof: stripped headers, page 404s (critical strip-before-branch case)', async ({
