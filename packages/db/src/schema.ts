@@ -24,6 +24,7 @@
  */
 
 import {
+  check,
   pgTable,
   uuid,
   text,
@@ -72,6 +73,14 @@ export const verificationTypeEnum = pgEnum('verification_type', [
   'email_verify',     // confirm email address on signup
   'password_reset',   // password reset link (platform users + end users w/ password)
 ]);
+
+// DEL-19: storefront-type discriminator.
+//   'brand'  → single-brand storefront. Has primary_brand_id; routes
+//              currently match brands.slug (DEL-20 swaps the lookup).
+//   'tenant' → tenant-level (food-hall) storefront. No primary_brand_id;
+//              hosts many brands behind one URL (DEL-25 builds the UX).
+// CHECK constraint on the table enforces "type='brand' ⟺ primary_brand_id NOT NULL".
+export const storefrontTypeEnum = pgEnum('storefront_type', ['brand', 'tenant']);
 
 // ============================================================================
 // PLATFORM IDENTITY (apps/platform)
@@ -418,6 +427,76 @@ export const locationBrands = pgTable('location_brands', {
 }));
 
 /**
+ * storefronts — customer-facing entry points (DEL-19 / ADR-0012)
+ *
+ * Storefront ≠ brand. A storefront is a URL/shell that may host one brand
+ * (type='brand', current default — what `{brand}.deliverse.app` resolves
+ * to today) or many brands (type='tenant', food-hall mode shipped by
+ * DEL-25). Backfill from DEL-19 migration creates one row per LIVE brand
+ * with type='brand', primary_brand_id=brand.id, slug=brand.slug.
+ *
+ * DEL-19 is additive only — application code still routes via brands.slug.
+ * DEL-20 switches the storefront proxy/resolver onto this table.
+ *
+ * Spec: docs/specs/storefronts-model.md.
+ * ADR:  docs/decisions/0012-storefront-brand-tenant-food-hall-architecture.md.
+ */
+export const storefronts = pgTable('storefronts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  // Owner tenant. Cascade delete: kill tenant → kill its storefronts.
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  // Subdomain. Partial-unique among active rows (mirrors brands.slug).
+  // Drives the future host → storefront lookup in DEL-20+.
+  slug: text('slug').notNull(),
+
+  name: text('name').notNull(),
+
+  // Discriminator. CHECK constraint below enforces:
+  //   type='brand'  ⟹  primary_brand_id NOT NULL
+  //   type='tenant' ⟹  primary_brand_id IS NULL
+  type: storefrontTypeEnum('type').notNull(),
+
+  // Required when type='brand', NULL when type='tenant'. DEL-19 backfill
+  // sets this for every live brand; later admin paths can add or
+  // re-target.
+  primaryBrandId: uuid('primary_brand_id')
+    .references(() => brands.id, { onDelete: 'cascade' }),
+
+  // Branding overrides (color, logo URL, etc.). Backfill copies the
+  // brand's branding_json once; no sync mechanism in v1 — see spec.
+  brandingJson: jsonb('branding_json').$type<BrandBranding>().notNull().default({}),
+
+  isActive: boolean('is_active').notNull().default(true),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  // Subdomain partial-unique among active rows (matches brands.slug pattern).
+  slugIdx: uniqueIndex('storefronts_slug_idx')
+    .on(t.slug)
+    .where(sql`${t.deletedAt} IS NULL`),
+
+  // "All storefronts of this tenant" — admin UI.
+  tenantIdx: index('storefronts_tenant_idx').on(t.tenantId),
+
+  // "Find the storefront for this brand" — DEL-20+ resolves brand-host
+  // requests by primary_brand_id during the transitional period.
+  primaryBrandIdx: index('storefronts_primary_brand_idx').on(t.primaryBrandId),
+
+  // Defense-in-depth: app-layer should also validate, but the DB makes
+  // the (type, primary_brand_id) invariant impossible to break.
+  primaryBrandCheck: check(
+    'storefronts_type_primary_brand_check',
+    sql`(${t.type} = 'brand' AND ${t.primaryBrandId} IS NOT NULL) OR (${t.type} = 'tenant' AND ${t.primaryBrandId} IS NULL)`,
+  ),
+}));
+
+/**
  * tenant_memberships — platform_users × tenants with role
  *
  * Better-Auth organization plugin maps this as "member" model.
@@ -747,6 +826,9 @@ export type TenantMembership = typeof tenantMemberships.$inferSelect;
 export type TenantOtpLockout = typeof tenantOtpLockouts.$inferSelect;
 export type NewTenantOtpLockout = typeof tenantOtpLockouts.$inferInsert;
 
+export type Storefront = typeof storefronts.$inferSelect;
+export type NewStorefront = typeof storefronts.$inferInsert;
+
 // ============================================================================
 // RELATIONS (for Drizzle's relational queries)
 // ============================================================================
@@ -762,6 +844,7 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   brands: many(brands),
   memberships: many(tenantMemberships),
   endUsers: many(tenantEndUsers),
+  storefronts: many(storefronts),
 }));
 
 export const brandsRelations = relations(brands, ({ one, many }) => ({
@@ -770,6 +853,21 @@ export const brandsRelations = relations(brands, ({ one, many }) => ({
     references: [tenants.id],
   }),
   locations: many(locationBrands),
+  // DEL-19: a brand can have many storefront rows over its lifetime
+  // (e.g., after slug rename + soft-delete cycle). No reverse "primary
+  // storefront" pointer — app-layer picks the active one when needed.
+  storefronts: many(storefronts),
+}));
+
+export const storefrontsRelations = relations(storefronts, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [storefronts.tenantId],
+    references: [tenants.id],
+  }),
+  primaryBrand: one(brands, {
+    fields: [storefronts.primaryBrandId],
+    references: [brands.id],
+  }),
 }));
 
 export const locationsRelations = relations(locations, ({ one, many }) => ({
