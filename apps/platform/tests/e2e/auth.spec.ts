@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 /**
  * Platform auth E2E tests
@@ -48,34 +48,20 @@ test.describe('Platform Auth', () => {
     await expect(page.getByText(/invalid/i)).toBeVisible();
   });
 
-  // DEL-8 ship-blocker carve-out: the success-path login tests fail in CI
-  // because the page URL doesn't navigate after BA returns 200. Diagnostic
-  // confirmed BA returns `{redirect:true,token,user,url}` with status 200 —
-  // session created, but page stays at /login. Could be cookie scope, the
-  // signIn.email callbackURL race with router.push, or server-side session
-  // check not seeing the cookie. Tracked in a follow-up Linear issue (the
-  // PR description links it). `rejects wrong password` test above DOES work,
-  // so BA is reachable + the error path is covered.
-  test.fixme(
-    'successful login with email/password',
-    async ({ page }) => {
-      await page.goto('/login');
-      await page.getByLabel(/email/i).fill('admin@test.local');
-      await page.getByLabel(/password/i).fill(ADMIN_PW);
-      await page.getByRole('button', { name: 'Login', exact: true }).click();
-      await expect(page).toHaveURL(/\/dashboard/);
-    },
-  );
+  test('successful login with email/password', async ({ page }) => {
+    await page.goto('/login');
+    await page.getByLabel(/email/i).fill('admin@test.local');
+    await page.getByLabel(/password/i).fill(ADMIN_PW);
+    await page.getByRole('button', { name: 'Login', exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard/);
+  });
 
-  test.fixme(
-    'respects next parameter after login',
-    async ({ page }) => {
-      await page.goto('/dashboard/tenants');
-      await expect(page).toHaveURL(/\/login\?next=/);
-      await page.getByLabel(/email/i).fill('admin@test.local');
-      await page.getByLabel(/password/i).fill(ADMIN_PW);
-      await page.getByRole('button', { name: 'Login', exact: true }).click();
-      await expect(page).toHaveURL(/\/dashboard\/tenants/);
-    },
-  );
+  test('respects next parameter after login', async ({ page }) => {
+    await page.goto('/dashboard/tenants');
+    await expect(page).toHaveURL(/\/login\?next=/);
+    await page.getByLabel(/email/i).fill('admin@test.local');
+    await page.getByLabel(/password/i).fill(ADMIN_PW);
+    await page.getByRole('button', { name: 'Login', exact: true }).click();
+    await expect(page).toHaveURL(/\/dashboard\/tenants/);
+  });
 });

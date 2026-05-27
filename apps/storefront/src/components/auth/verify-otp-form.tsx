@@ -15,6 +15,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { Button } from '@rp/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import { Field, FieldError, FieldGroup } from '@rp/ui/components/field';
@@ -34,7 +35,7 @@ export function VerifyOtpForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const email = searchParams.get('email') ?? '';
-  const next = searchParams.get('next') ?? '/account';
+  const next = safeNextPath(searchParams.get('next'), '/account');
   // DEL-7 §5d/§5e: storefront signup threads name via ?name=&signup=true.
   // BA's signIn.emailOtp accepts optional `name` and uses it ONLY when
   // creating a first-time user — exactly the storefront signup intent.
