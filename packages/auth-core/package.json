@@ -10,6 +10,7 @@
     "./storefront": "./src/storefront.ts",
     "./storefront-adapter": "./src/storefront-adapter.ts",
     "./storefront-host": "./src/storefront-host.ts",
+    "./storefront-resolver": "./src/storefront-resolver.ts",
     "./storefront-tenant-resolver": "./src/storefront-tenant-resolver.ts",
     "./storefront-verification-type": "./src/storefront-verification-type.ts"
   },
