@@ -1,12 +1,21 @@
+import Link from 'next/link';
 import { db } from '@rp/db';
 import type { Cart } from '@rp/db';
 import { brands, cartItems, menuItems } from '@rp/db/schema';
 import { and, asc, eq } from 'drizzle-orm';
+import { Button } from '@rp/ui/components/button';
 import { CartLine } from './cart-line';
 
 type CartSummaryProps = {
   cart: Cart;
   currentPath: string;
+  /**
+   * Render a "Proceed to checkout" link below the subtotal when the
+   * cart has lines. Default false. /cart passes true; /checkout doesn't
+   * (the form on /checkout IS the checkout — second link would be
+   * redundant). DEL-25 PR 25c.
+   */
+  showCheckoutLink?: boolean;
 };
 
 /**
@@ -16,7 +25,11 @@ type CartSummaryProps = {
  *
  * DEL-25 PR 25b.
  */
-export async function CartSummary({ cart, currentPath }: CartSummaryProps) {
+export async function CartSummary({
+  cart,
+  currentPath,
+  showCheckoutLink = false,
+}: CartSummaryProps) {
   // Join cart_items → menu_items → brands so we have everything for
   // rendering in one round-trip. brand from the FK (not snapshot — cart
   // items are transient; the live brand row is what we want for display).
@@ -85,10 +98,15 @@ export async function CartSummary({ cart, currentPath }: CartSummaryProps) {
           </ul>
         </section>
       ))}
-      <div className="flex justify-end border-t border-[var(--color-border)] pt-4">
+      <div className="flex items-center justify-end gap-4 border-t border-[var(--color-border)] pt-4">
         <p className="text-lg font-semibold tabular-nums">
           Subtotal: ${subtotal}
         </p>
+        {showCheckoutLink && (
+          <Button asChild>
+            <Link href="/checkout">Proceed to checkout</Link>
+          </Button>
+        )}
       </div>
     </div>
   );
