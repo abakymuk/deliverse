@@ -61,9 +61,12 @@ export function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Auth check for protected paths
+  // Auth check for protected paths. Pass the cookiePrefix storefront BA is
+  // configured with (packages/auth-core/src/storefront.ts → advanced.cookiePrefix);
+  // otherwise getSessionCookie defaults to 'better-auth' and never matches our
+  // cookie, bouncing every authenticated request back to /login?next=... (DEL-17).
   if (PROTECTED_PATHS.some((p) => pathname.startsWith(p))) {
-    const sessionCookie = getSessionCookie(request);
+    const sessionCookie = getSessionCookie(request, { cookiePrefix: 'rp_store' });
     if (!sessionCookie) {
       const loginUrl = new URL('/login', request.url);
       loginUrl.searchParams.set('next', pathname);

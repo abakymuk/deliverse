@@ -11,7 +11,7 @@
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { Route } from 'next';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
@@ -37,7 +37,6 @@ const loginSchema = z.object({
 type LoginValues = z.infer<typeof loginSchema>;
 
 export function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
   const next = safeNextPath(searchParams.get('next'), '/dashboard');
 
@@ -58,6 +57,7 @@ export function LoginForm() {
       const result = await signIn.email({
         email: values.email,
         password: values.password,
+        callbackURL: next,
       });
 
       if (result.error) {
@@ -67,7 +67,12 @@ export function LoginForm() {
         return;
       }
 
-      router.push(next as Route);
+      // BA's redirect plugin handles navigation via window.location.href on
+      // success — a full reload, which guarantees the Set-Cookie response is
+      // persisted before the next request. Calling router.push here races the
+      // plugin (DEL-17 / DEL-8 CI repro): soft-nav can fire its request before
+      // Chromium headless persists the cookie, server-side session check sees
+      // nothing, bounces back to /login.
     } catch (err) {
       setError('root', {
         message: err instanceof Error ? err.message : 'Unknown error',
