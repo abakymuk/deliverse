@@ -35,6 +35,18 @@ jobs:
           DOPPLER_PROJECT: deliverse
           DOPPLER_CONFIG: stg
 
+      # Seed is idempotent (`onConflictDoNothing` + targeted UPDATEs for
+      # name convergence per DEL-25). Running on every deploy ensures the
+      # canonical dataset (hospitality-group + menus, OOMI Kitchen demo
+      # tenant + brands + menus, etc.) stays in sync with seed.ts.
+      # SEED_TEST_FIXTURES intentionally left unset on stg — the test-only
+      # multi-brand cart fixture is dev/CI only.
+      - name: Seed staging DB
+        run: doppler run --token=${{ secrets.DOPPLER_TOKEN_STG }} -- pnpm db:seed
+        env:
+          DOPPLER_PROJECT: deliverse
+          DOPPLER_CONFIG: stg
+
   deploy-platform:
     name: Deploy platform to staging
     needs: migrate
