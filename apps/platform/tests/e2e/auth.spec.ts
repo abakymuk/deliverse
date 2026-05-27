@@ -25,10 +25,10 @@ test.describe('Platform Auth', () => {
 
   test('shows login form', async ({ page }) => {
     await page.goto('/login');
-    // Actual heading per apps/platform/src/components/auth/login-form.tsx:86
-    // ("Login to your account"). Tests previously asserted "Welcome back"
-    // which never matched — DEL-8 fixes the stale expectation.
-    await expect(page.getByRole('heading', { name: /login to your account/i })).toBeVisible();
+    // CardTitle from @rp/ui renders as <div>, not a heading element — so
+    // getByRole('heading') doesn't match. Use getByText for the title +
+    // getByLabel for form fields (those are real <label htmlFor>).
+    await expect(page.getByText(/login to your account/i)).toBeVisible();
     await expect(page.getByLabel(/email/i)).toBeVisible();
     await expect(page.getByLabel(/password/i)).toBeVisible();
   });
@@ -37,17 +37,28 @@ test.describe('Platform Auth', () => {
     await page.goto('/login');
     await page.getByLabel(/email/i).fill('admin@test.local');
     await page.getByLabel(/password/i).fill(ADMIN_PW);
-    // Two buttons on the page contain "Login": the submit button (exact "Login")
-    // and "Login with Google". `exact: true` disambiguates.
-    await page.getByRole('button', { name: 'Login', exact: true }).click();
 
-    await expect(page).toHaveURL(/\/dashboard/);
+    // Capture the BA signin response so failures here have diagnostic data
+    // (DEL-8 first run showed URL didn't redirect; this lets us see if BA
+    // returned an error or success-with-cookie-issue).
+    const signinResp = page.waitForResponse(
+      (resp) => resp.url().includes('/api/auth/sign-in/email') && resp.request().method() === 'POST',
+    );
+    // Two buttons contain "Login": the submit button (exact) and "Login with Google".
+    await page.getByRole('button', { name: 'Login', exact: true }).click();
+    const resp = await signinResp;
+    const body = await resp.text().catch(() => '<no-body>');
+    console.log(`[diagnostic] signin status=${resp.status()} body=${body.slice(0, 300)}`);
+
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 10000 });
   });
 
   test('rejects wrong password', async ({ page }) => {
     await page.goto('/login');
     await page.getByLabel(/email/i).fill('admin@test.local');
-    await page.getByLabel(/password/i).fill('WrongPassword');
+    // Form has a zod min(12) password validator — use ≥12-char wrong pw to
+    // ensure the BA call actually fires (not blocked by client-side validation).
+    await page.getByLabel(/password/i).fill('WrongPassword99');
     await page.getByRole('button', { name: 'Login', exact: true }).click();
 
     await expect(page.getByText(/invalid/i)).toBeVisible();
@@ -59,8 +70,15 @@ test.describe('Platform Auth', () => {
 
     await page.getByLabel(/email/i).fill('admin@test.local');
     await page.getByLabel(/password/i).fill(ADMIN_PW);
-    await page.getByRole('button', { name: 'Login', exact: true }).click();
 
-    await expect(page).toHaveURL(/\/dashboard\/tenants/);
+    const signinResp = page.waitForResponse(
+      (resp) => resp.url().includes('/api/auth/sign-in/email') && resp.request().method() === 'POST',
+    );
+    await page.getByRole('button', { name: 'Login', exact: true }).click();
+    const resp = await signinResp;
+    const body = await resp.text().catch(() => '<no-body>');
+    console.log(`[diagnostic next-param] signin status=${resp.status()} body=${body.slice(0, 300)}`);
+
+    await expect(page).toHaveURL(/\/dashboard\/tenants/, { timeout: 10000 });
   });
 });

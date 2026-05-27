@@ -22,9 +22,11 @@ test.describe('Storefront Auth — OTP flow', () => {
     // The current LoginForm renders a generic "Sign in" CardTitle — no brand
     // banner. Brand-themed page header is a future enhancement; for DEL-8 we
     // verify the form renders + the email field is present. If/when a brand
-    // banner lands, switch this to assert `/pizza express/i` in the heading.
+    // banner lands, switch this to assert `/pizza express/i` in the title.
+    // CardTitle from @rp/ui renders as <div>, not a heading element, so
+    // getByText is the right matcher (not getByRole('heading')).
     await page.goto('/login');
-    await expect(page.getByRole('heading', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByText(/sign in/i).first()).toBeVisible();
     await expect(page.getByLabel(/email/i)).toBeVisible();
   });
 
