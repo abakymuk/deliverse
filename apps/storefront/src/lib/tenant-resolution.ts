@@ -14,11 +14,13 @@ import {
   extractBrandSlug as extractBrandSlugFromHost,
   extractStorefrontSlug as extractStorefrontSlugFromHost,
 } from '@rp/auth-core/storefront-host';
+import type { StorefrontTenantContext } from '@rp/auth-core/storefront-adapter';
 import { resolveBrandBySlug } from '@rp/auth-core/storefront-tenant-resolver';
 import type { BrandContext } from '@rp/auth-core/storefront-tenant-resolver';
 import { cache } from 'react';
+import { resolveStorefrontTenantContext } from './storefront-tenant-context';
 
-export type { BrandContext };
+export type { BrandContext, StorefrontTenantContext };
 
 /**
  * Extract the brand slug from a Host header value, using
@@ -62,3 +64,26 @@ export function extractStorefrontSlug(host: string | null): string | null {
 export const getBrandContext = cache(async (brandSlug: string): Promise<BrandContext | null> => {
   return resolveBrandBySlug(brandSlug);
 });
+
+/**
+ * Page-friendly wrapper around `resolveStorefrontTenantContext()`.
+ *
+ * `resolveStorefrontTenantContext()` throws `APIError('BAD_REQUEST', ...)` on
+ * malformed requests (no host, unknown slug, etc.) — the right behavior for
+ * BA's HTTP-layer error mapping. For RSC pages we want `null` instead so the
+ * page layer can call `notFound()` for a 404 response.
+ *
+ * Cached per request — multiple components calling `getStorefrontContext`
+ * share a single resolve.
+ *
+ * DEL-25 / docs/specs/food-hall-storefront.md.
+ */
+export const getStorefrontContext = cache(
+  async (): Promise<StorefrontTenantContext | null> => {
+    try {
+      return await resolveStorefrontTenantContext();
+    } catch {
+      return null;
+    }
+  },
+);
