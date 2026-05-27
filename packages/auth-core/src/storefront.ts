@@ -143,7 +143,9 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
         const ctx = await resolveTenantContext();
         // DEL-15: BA freezes ctx.context.baseURL at init time from
         // BETTER_AUTH_URL (= platform host). Storefront BA is multi-tenant,
-        // so we rewrite the origin per-request to the user's brand subdomain.
+        // so we rewrite the origin per-request to the user's storefront
+        // subdomain. DEL-22: storefrontSlug works for both brand-host and
+        // tenant-host modes (the slug IS the matched subdomain).
         const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
         if (!baseDomain) {
           throw new Error(
@@ -153,21 +155,44 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
         const proto = process.env.NODE_ENV === 'production' ? 'https' : 'http';
         const rewrittenUrl = rewriteStorefrontEmailUrl({
           originalUrl: url,
-          brandSlug: ctx.brandSlug,
+          storefrontSlug: ctx.storefrontSlug,
           baseDomain,
           proto,
         });
-        await inngest.send({
-          name: 'email.password_reset.requested',
-          data: {
-            instance: 'storefront',
-            email: user.email,
-            userId: user.id,
-            url: rewrittenUrl,
-            tenantId: ctx.tenantId,
-            brandSlug: ctx.brandSlug,
-          },
-        });
+        // DEL-22: emit per-mode payload. Brand-mode is verbatim today's shape
+        // (no `mode` field → back-compat with in-flight Inngest events).
+        // Tenant-mode adds `mode: 'tenant'` + storefrontId/storefrontSlug for
+        // the email-branding fallback in @rp/emails.
+        if (ctx.storefrontType === 'brand') {
+          await inngest.send({
+            name: 'email.password_reset.requested',
+            data: {
+              instance: 'storefront',
+              email: user.email,
+              userId: user.id,
+              url: rewrittenUrl,
+              tenantId: ctx.tenantId,
+              // biome-ignore lint/style/noNonNullAssertion: type narrowing on
+              // ctx.storefrontType==='brand' guarantees brandSlug presence
+              // (see StorefrontTenantContext in storefront-adapter.ts).
+              brandSlug: ctx.brandSlug!,
+            },
+          });
+        } else {
+          await inngest.send({
+            name: 'email.password_reset.requested',
+            data: {
+              instance: 'storefront',
+              mode: 'tenant',
+              email: user.email,
+              userId: user.id,
+              url: rewrittenUrl,
+              tenantId: ctx.tenantId,
+              storefrontId: ctx.storefrontId,
+              storefrontSlug: ctx.storefrontSlug,
+            },
+          });
+        }
       },
     },
 
@@ -232,16 +257,37 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
                 ? 'email_verify'
                 : 'password_reset';
           const ctx = await resolveTenantContext();
-          await inngest.send({
-            name: 'email.otp.requested',
-            data: {
-              email,
-              otp,
-              type: eventType,
-              tenantId: ctx.tenantId,
-              brandSlug: ctx.brandSlug,
-            },
-          });
+          // DEL-22: emit per-mode payload. Brand-mode is verbatim today's
+          // shape (no `mode` field → back-compat); tenant-mode adds
+          // mode: 'tenant' + storefrontId/storefrontSlug for the
+          // email-branding fallback in @rp/emails.
+          if (ctx.storefrontType === 'brand') {
+            await inngest.send({
+              name: 'email.otp.requested',
+              data: {
+                email,
+                otp,
+                type: eventType,
+                tenantId: ctx.tenantId,
+                // biome-ignore lint/style/noNonNullAssertion: type narrowing
+                // on ctx.storefrontType==='brand' guarantees brandSlug presence.
+                brandSlug: ctx.brandSlug!,
+              },
+            });
+          } else {
+            await inngest.send({
+              name: 'email.otp.requested',
+              data: {
+                email,
+                otp,
+                type: eventType,
+                tenantId: ctx.tenantId,
+                mode: 'tenant',
+                storefrontId: ctx.storefrontId,
+                storefrontSlug: ctx.storefrontSlug,
+              },
+            });
+          }
         },
       }),
     ],

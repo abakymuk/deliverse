@@ -12,12 +12,15 @@
  * BA instance is multi-tenant, so a static `baseURL` is structurally wrong.
  * We post-process the URL in the `sendResetPassword` callback instead.
  *
- * The brand host is reconstructed as `${brandSlug}.${baseDomain}`. The
- * brandSlug comes from `resolveStorefrontTenantContext` (already derived
- * from `Host` upstream) and `baseDomain` from
- * `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` (already used by `trustedOrigins` in
- * the same BA config). No `next/headers` import in this package — keeps
- * @rp/auth-core UI-framework-free per ADR-0009.
+ * The storefront host is reconstructed as `${storefrontSlug}.${baseDomain}`.
+ * The storefrontSlug comes from `resolveStorefrontTenantContext` (already
+ * derived from `Host` upstream — it's the matched subdomain regardless of
+ * whether the storefront is brand-type or tenant-type per ADR-0012) and
+ * `baseDomain` from `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` (already used by
+ * `trustedOrigins` in the same BA config). No `next/headers` import in this
+ * package — keeps @rp/auth-core UI-framework-free per ADR-0009.
+ *
+ * DEL-22 renamed `brandSlug` → `storefrontSlug` (same logic; semantic shift).
  */
 
 /**
@@ -41,8 +44,10 @@ function normalizeBaseDomainForUrl(s: string): string {
 export type RewriteStorefrontEmailUrlInput = {
   /** BA-constructed URL (origin currently points at platform host). */
   originalUrl: string;
-  /** Brand subdomain slug, e.g. 'pizza-express'. From `resolveTenantContext`. */
-  brandSlug: string;
+  /** Storefront subdomain slug, e.g. 'pizza-express' or 'oomi-kitchen-test'.
+   * From `resolveStorefrontTenantContext`. DEL-22: same slug regardless of
+   * `storefrontType` ('brand' or 'tenant'); the slug IS the subdomain. */
+  storefrontSlug: string;
   /** Value of `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN`. May include scheme prefix. */
   baseDomain: string;
   /** 'https' in stg/prd, 'http' in dev. Match `trustedOrigins` derivation. */
@@ -50,10 +55,10 @@ export type RewriteStorefrontEmailUrlInput = {
 };
 
 export function rewriteStorefrontEmailUrl(input: RewriteStorefrontEmailUrlInput): string {
-  const { originalUrl, brandSlug, baseDomain, proto } = input;
+  const { originalUrl, storefrontSlug, baseDomain, proto } = input;
   const normalizedBaseDomain = normalizeBaseDomainForUrl(baseDomain);
   const u = new URL(originalUrl);
   u.protocol = `${proto}:`;
-  u.host = `${brandSlug}.${normalizedBaseDomain}`;
+  u.host = `${storefrontSlug}.${normalizedBaseDomain}`;
   return u.toString();
 }

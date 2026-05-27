@@ -35,9 +35,13 @@ import { wrappedStorefrontAdapter } from './storefront-adapter';
 const TENANT_ID = '11111111-1111-4111-9111-111111111111';
 const BRAND_ID = '22222222-2222-4222-9222-222222222222';
 const BRAND_SLUG = 'pizza-express';
+const STOREFRONT_ID = '33333333-3333-4333-9333-333333333333';
 
 const CONTEXT: StorefrontTenantContext = {
   tenantId: TENANT_ID,
+  storefrontId: STOREFRONT_ID,
+  storefrontType: 'brand',
+  storefrontSlug: BRAND_SLUG, // brand-mode: storefront slug equals brand slug per DEL-19 backfill
   brandId: BRAND_ID,
   brandSlug: BRAND_SLUG,
 };
@@ -199,13 +203,14 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
 
   it('session.create stamps currentBrandId NULL for tenant-mode sessions (DEL-21)', async () => {
     const inner = makeInner();
-    // Tenant-mode resolver: no brandId key. Unreachable in production until
-    // DEL-22 flips the BA tenant resolver based on storefrontType, but the
-    // optional `StorefrontTenantContext.brandId` lets us exercise the adapter
-    // branch today.
+    // Tenant-mode resolver: no brandId/brandSlug keys. Post-DEL-22 the BA
+    // resolver returns this shape for tenant-host requests; the adapter
+    // stamps NULL for currentBrandId via the explicit `?? null`.
     const tenantModeResolver: ResolveTenantContext = vi.fn(async () => ({
       tenantId: TENANT_ID,
-      brandSlug: BRAND_SLUG,
+      storefrontId: STOREFRONT_ID,
+      storefrontType: 'tenant' as const,
+      storefrontSlug: 'oomi-kitchen-test',
     }));
     const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, tenantModeResolver);
 
@@ -220,6 +225,57 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
     // silently regress the tenant-mode invariant.
     expect(call?.currentBrandId).toBe(null);
     expect(call?.tenantId).toBeUndefined();
+  });
+
+  it('verification.create stamps brandId NULL for tenant-mode (DEL-22)', async () => {
+    const inner = makeInner();
+    const tenantModeResolver: ResolveTenantContext = vi.fn(async () => ({
+      tenantId: TENANT_ID,
+      storefrontId: STOREFRONT_ID,
+      storefrontType: 'tenant' as const,
+      storefrontSlug: 'oomi-kitchen-test',
+    }));
+    const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, tenantModeResolver);
+
+    // Use an email-verify identifier (not 'sign-in-otp-...') so the rate-limit
+    // branch (DEL-9, only fires for type='otp_login') doesn't kick in and hit
+    // the unmocked `db.select(tenantOtpLockouts)` chain. The verification
+    // adapter's brandId-stamping behavior is the same for all types.
+    await wrapped.create({
+      model: 'verification',
+      data: {
+        identifier: 'email-verification-otp-jane@example.com',
+        value: '$2b$12$hashedotp',
+        expiresAt: new Date(),
+      },
+    });
+
+    const call = inner.create.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    // DEL-22: `brandId: ctx.brandId ?? null` — tenant-mode rows write NULL.
+    // tenantId is still stamped (security boundary unchanged).
+    expect(call?.brandId).toBe(null);
+    expect(call?.tenantId).toBe(TENANT_ID);
+  });
+
+  it('account.create with tenant-mode context stamps tenantId only (no brand leakage)', async () => {
+    const inner = makeInner();
+    const tenantModeResolver: ResolveTenantContext = vi.fn(async () => ({
+      tenantId: TENANT_ID,
+      storefrontId: STOREFRONT_ID,
+      storefrontType: 'tenant' as const,
+      storefrontSlug: 'oomi-kitchen-test',
+    }));
+    const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, tenantModeResolver);
+
+    await wrapped.create({
+      model: 'account',
+      data: { providerId: 'credential', accountId: 'cred-1', tenantEndUserId: 'u-1' },
+    });
+
+    const data = inner.create.mock.calls[0]?.[0]?.data as Record<string, unknown>;
+    expect(data?.tenantId).toBe(TENANT_ID);
+    expect(data?.brandId).toBeUndefined();
+    expect(data?.currentBrandId).toBeUndefined();
   });
 
   it('session.findOne (by token) does NOT get a tenantId predicate', async () => {

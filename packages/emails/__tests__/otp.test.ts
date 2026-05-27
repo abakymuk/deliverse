@@ -18,6 +18,7 @@ import type { OtpRequestedData } from '../src/events';
 
 vi.mock('../src/brand-context', () => ({
   resolveEmailBrandContext: vi.fn(),
+  resolveTenantStorefrontEmailContext: vi.fn(),
   BrandResolutionError: class BrandResolutionError extends Error {},
 }));
 
@@ -27,16 +28,20 @@ vi.mock('../src/client', () => ({
 }));
 
 const { handleOtpRequested } = await import('../src/handlers/otp-requested');
-const { resolveEmailBrandContext } = await import('../src/brand-context');
+const { resolveEmailBrandContext, resolveTenantStorefrontEmailContext } = await import(
+  '../src/brand-context'
+);
 const { sendEmail } = await import('../src/client');
 
 const resolveMock = vi.mocked(resolveEmailBrandContext);
+const resolveTenantMock = vi.mocked(resolveTenantStorefrontEmailContext);
 const sendMock = vi.mocked(sendEmail);
 
 // ── Fixtures (valid v4 UUIDs — Zod 4 enforces RFC 4122) ───────────────────
 
 const TENANT_ID = '11111111-1111-4111-9111-111111111111';
 const BRAND_ID = '22222222-2222-4222-9222-222222222222';
+const STOREFRONT_ID = '33333333-3333-4333-9333-333333333333';
 
 const tenantFixture = {
   id: TENANT_ID,
@@ -72,6 +77,7 @@ const validData: OtpRequestedData = {
 
 beforeEach(() => {
   resolveMock.mockReset();
+  resolveTenantMock.mockReset();
   sendMock.mockReset();
 });
 
@@ -137,6 +143,88 @@ describe('handleOtpRequested', () => {
     resolveMock.mockResolvedValue({ brand: brandFixture, tenant: tenantFixture });
 
     await expect(handleOtpRequested({ ...validData, tenantId: 'not-a-uuid' })).rejects.toThrow();
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+});
+
+// ── DEL-22 tenant-mode handler tests ──────────────────────────────────────
+
+const storefrontFixture = {
+  id: STOREFRONT_ID,
+  tenantId: TENANT_ID,
+  slug: 'oomi-kitchen-test',
+  name: 'OOMI Kitchen Test',
+  type: 'tenant' as const,
+  primaryBrandId: null,
+  brandingJson: { primary: '#16a34a', logo: 'https://cdn.example/oomi.png' },
+  isActive: true,
+  createdAt: new Date('2026-01-01'),
+  updatedAt: new Date('2026-01-01'),
+  deletedAt: null,
+};
+
+const tenantModeData: OtpRequestedData = {
+  email: 'jane@example.com',
+  otp: '654321',
+  type: 'otp_login',
+  tenantId: TENANT_ID,
+  mode: 'tenant',
+  storefrontId: STOREFRONT_ID,
+  storefrontSlug: 'oomi-kitchen-test',
+};
+
+describe('handleOtpRequested — tenant mode (DEL-22)', () => {
+  it('resolves storefront context (not brand context) and renders with storefront name', async () => {
+    resolveTenantMock.mockResolvedValue({ storefront: storefrontFixture, tenant: tenantFixture });
+    sendMock.mockResolvedValue({ id: 'resend-tenant-id' });
+
+    const result = await handleOtpRequested(tenantModeData);
+
+    expect(result).toEqual({ id: 'resend-tenant-id' });
+    expect(resolveTenantMock).toHaveBeenCalledWith(STOREFRONT_ID, TENANT_ID);
+    expect(resolveMock).not.toHaveBeenCalled(); // brand resolver MUST NOT fire in tenant mode
+
+    const args = sendMock.mock.calls[0]?.[0];
+    expect(args?.to).toBe('jane@example.com');
+    expect(args?.subject).toBe('Your sign-in code for OOMI Kitchen Test');
+  });
+
+  it('rendered template uses storefront branding (logo + primary color from storefront.brandingJson)', async () => {
+    resolveTenantMock.mockResolvedValue({ storefront: storefrontFixture, tenant: tenantFixture });
+    sendMock.mockResolvedValue({ id: 'x' });
+
+    await handleOtpRequested(tenantModeData);
+
+    const args = sendMock.mock.calls[0]?.[0];
+    if (!args) throw new Error('sendMock was not called');
+    const html = await render(args.react);
+    expect(html).toContain('654321');
+    expect(html).toContain('OOMI Kitchen Test');
+    expect(html).toContain('https://cdn.example/oomi.png'); // storefront logo
+    expect(html).toContain('#16a34a'); // storefront primary color
+  });
+
+  it('falls back to DELIVERSE_PRIMARY when storefront.brandingJson has no primary', async () => {
+    const minimalStorefront = { ...storefrontFixture, brandingJson: {} };
+    resolveTenantMock.mockResolvedValue({ storefront: minimalStorefront, tenant: tenantFixture });
+    sendMock.mockResolvedValue({ id: 'x' });
+
+    await handleOtpRequested(tenantModeData);
+
+    const args = sendMock.mock.calls[0]?.[0];
+    if (!args) throw new Error('sendMock was not called');
+    const html = await render(args.react);
+    // Storefront name still renders (no logo to fall back to either).
+    expect(html).toContain('OOMI Kitchen Test');
+    // Doesn't contain the storefront logo since brandingJson is empty.
+    expect(html).not.toContain('https://cdn.example/oomi.png');
+  });
+
+  it('propagates tenant-resolver throws (Inngest retries)', async () => {
+    const boom = new Error('emails: brand resolution failed — boom (tenant)');
+    resolveTenantMock.mockRejectedValue(boom);
+
+    await expect(handleOtpRequested(tenantModeData)).rejects.toThrow(/brand resolution failed/);
     expect(sendMock).not.toHaveBeenCalled();
   });
 });

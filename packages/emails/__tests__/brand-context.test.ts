@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const TENANT_ID = '11111111-1111-4111-9111-111111111111';
 const OTHER_TENANT_ID = '99999999-9999-4999-9999-999999999999';
 const BRAND_ID = '22222222-2222-4222-9222-222222222222';
+const STOREFRONT_ID = '33333333-3333-4333-9333-333333333333';
 
 const tenantFixture = {
   id: TENANT_ID,
@@ -54,6 +55,7 @@ vi.mock('@rp/db', () => {
     db: { select: () => chain },
     brands: {},
     tenants: {},
+    storefronts: {},
   };
 });
 
@@ -63,7 +65,8 @@ vi.mock('drizzle-orm', () => ({
   isNull: vi.fn(),
 }));
 
-const { resolveEmailBrandContext, BrandResolutionError } = await import('../src/brand-context');
+const { resolveEmailBrandContext, resolveTenantStorefrontEmailContext, BrandResolutionError } =
+  await import('../src/brand-context');
 
 beforeEach(() => {
   limitMock.mockReset();
@@ -97,6 +100,59 @@ describe('resolveEmailBrandContext', () => {
       BrandResolutionError,
     );
     await expect(resolveEmailBrandContext('pizza-express', TENANT_ID)).rejects.toThrow(
+      /tenant ownership mismatch/,
+    );
+  });
+});
+
+// ── DEL-22 tenant-mode (food-hall) storefront resolver ────────────────────
+
+const storefrontFixture = {
+  id: STOREFRONT_ID,
+  tenantId: TENANT_ID,
+  slug: 'oomi-kitchen-test',
+  name: 'OOMI Kitchen Test',
+  type: 'tenant' as const,
+  primaryBrandId: null,
+  brandingJson: { primary: '#16a34a', logo: 'https://cdn.example/oomi.png' },
+  isActive: true,
+  createdAt: new Date('2026-01-01'),
+  updatedAt: new Date('2026-01-01'),
+  deletedAt: null,
+};
+
+describe('resolveTenantStorefrontEmailContext (DEL-22)', () => {
+  it('returns { storefront, tenant } when the join matches and ownership checks out', async () => {
+    limitMock.mockResolvedValue([{ storefront: storefrontFixture, tenant: tenantFixture }]);
+
+    const result = await resolveTenantStorefrontEmailContext(STOREFRONT_ID, TENANT_ID);
+    expect(result.storefront.slug).toBe('oomi-kitchen-test');
+    expect(result.storefront.type).toBe('tenant');
+    expect(result.tenant.id).toBe(TENANT_ID);
+  });
+
+  it('throws BrandResolutionError when no storefront matches the join', async () => {
+    limitMock.mockResolvedValue([]);
+
+    await expect(
+      resolveTenantStorefrontEmailContext(STOREFRONT_ID, TENANT_ID),
+    ).rejects.toBeInstanceOf(BrandResolutionError);
+    await expect(resolveTenantStorefrontEmailContext(STOREFRONT_ID, TENANT_ID)).rejects.toThrow(
+      /no active storefront/,
+    );
+  });
+
+  it('throws BrandResolutionError when storefront.tenantId !== event.tenantId (cross-tenant defense)', async () => {
+    // SQL-side `eq(storefronts.tenantId, tenantId)` should prevent this row
+    // from being selected at all; but if a future SQL refactor regresses
+    // that guard, the post-read check catches the mismatch.
+    const mismatch = { ...storefrontFixture, tenantId: OTHER_TENANT_ID };
+    limitMock.mockResolvedValue([{ storefront: mismatch, tenant: tenantFixture }]);
+
+    await expect(
+      resolveTenantStorefrontEmailContext(STOREFRONT_ID, TENANT_ID),
+    ).rejects.toBeInstanceOf(BrandResolutionError);
+    await expect(resolveTenantStorefrontEmailContext(STOREFRONT_ID, TENANT_ID)).rejects.toThrow(
       /tenant ownership mismatch/,
     );
   });

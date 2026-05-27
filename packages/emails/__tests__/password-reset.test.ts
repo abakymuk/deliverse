@@ -12,6 +12,7 @@ import type { PasswordResetRequestedData } from '../src/events';
 
 vi.mock('../src/brand-context', () => ({
   resolveEmailBrandContext: vi.fn(),
+  resolveTenantStorefrontEmailContext: vi.fn(),
   BrandResolutionError: class BrandResolutionError extends Error {},
 }));
 
@@ -21,15 +22,19 @@ vi.mock('../src/client', () => ({
 }));
 
 const { handlePasswordResetRequested } = await import('../src/handlers/password-reset-requested');
-const { resolveEmailBrandContext } = await import('../src/brand-context');
+const { resolveEmailBrandContext, resolveTenantStorefrontEmailContext } = await import(
+  '../src/brand-context'
+);
 const { sendEmail } = await import('../src/client');
 
 const resolveMock = vi.mocked(resolveEmailBrandContext);
+const resolveTenantMock = vi.mocked(resolveTenantStorefrontEmailContext);
 const sendMock = vi.mocked(sendEmail);
 
 const TENANT_ID = '11111111-1111-4111-9111-111111111111';
 const USER_ID = '33333333-3333-4333-9333-333333333333';
 const BRAND_ID = '22222222-2222-4222-9222-222222222222';
+const STOREFRONT_ID = '44444444-4444-4444-9444-444444444444';
 
 const tenantFixture = {
   id: TENANT_ID,
@@ -59,6 +64,7 @@ const RESET_URL = 'https://pizza-express.deliverse.app/reset-password?token=abc'
 
 beforeEach(() => {
   resolveMock.mockReset();
+  resolveTenantMock.mockReset();
   sendMock.mockReset();
 });
 
@@ -142,6 +148,87 @@ describe('handlePasswordResetRequested — platform variant', () => {
     expect(html).toContain(platformData.url);
     expect(html).not.toContain('Pizza Express');
     expect(html).not.toContain('Hospitality Group');
+  });
+});
+
+// ── DEL-22 tenant-mode storefront variant ─────────────────────────────────
+
+describe('handlePasswordResetRequested — tenant mode (DEL-22)', () => {
+  const storefrontFixture = {
+    id: STOREFRONT_ID,
+    tenantId: TENANT_ID,
+    slug: 'oomi-kitchen-test',
+    name: 'OOMI Kitchen Test',
+    type: 'tenant' as const,
+    primaryBrandId: null,
+    brandingJson: { primary: '#16a34a', logo: 'https://cdn.example/oomi.png' },
+    isActive: true,
+    createdAt: new Date('2026-01-01'),
+    updatedAt: new Date('2026-01-01'),
+    deletedAt: null,
+  };
+
+  const TENANT_RESET_URL = 'https://oomi-kitchen-test.deliverse.app/reset-password?token=abc';
+
+  const tenantData: PasswordResetRequestedData = {
+    instance: 'storefront',
+    email: 'jane@example.com',
+    userId: USER_ID,
+    url: TENANT_RESET_URL,
+    mode: 'tenant',
+    tenantId: TENANT_ID,
+    storefrontId: STOREFRONT_ID,
+    storefrontSlug: 'oomi-kitchen-test',
+  };
+
+  it('resolves storefront (not brand) context and renders with storefront name subject', async () => {
+    resolveTenantMock.mockResolvedValue({ storefront: storefrontFixture, tenant: tenantFixture });
+    sendMock.mockResolvedValue({ id: 'resend-tenant-id' });
+
+    const result = await handlePasswordResetRequested(tenantData);
+
+    expect(result).toEqual({ id: 'resend-tenant-id' });
+    expect(resolveTenantMock).toHaveBeenCalledWith(STOREFRONT_ID, TENANT_ID);
+    expect(resolveMock).not.toHaveBeenCalled(); // brand resolver MUST NOT fire in tenant mode
+
+    const args = sendMock.mock.calls[0]?.[0];
+    expect(args?.subject).toBe('Reset your password for OOMI Kitchen Test');
+  });
+
+  it('rendered template uses storefront branding (logo + primary color from storefront.brandingJson)', async () => {
+    resolveTenantMock.mockResolvedValue({ storefront: storefrontFixture, tenant: tenantFixture });
+    sendMock.mockResolvedValue({ id: 'x' });
+
+    await handlePasswordResetRequested(tenantData);
+
+    const args = sendMock.mock.calls[0]?.[0];
+    if (!args) throw new Error('sendMock was not called');
+    const html = await render(args.react);
+    expect(html).toContain('OOMI Kitchen Test');
+    expect(html).toContain(TENANT_RESET_URL);
+    expect(html).toContain('https://cdn.example/oomi.png');
+    expect(html).toContain('#16a34a');
+  });
+
+  it('falls back through storefront.brandingJson → tenant.logo → DELIVERSE_PRIMARY', async () => {
+    // No storefront branding; tenant has a logo to fall back to.
+    const minimalStorefront = { ...storefrontFixture, brandingJson: {} };
+    const tenantWithLogo = { ...tenantFixture, logo: 'https://cdn.example/tenant.png' };
+    resolveTenantMock.mockResolvedValue({ storefront: minimalStorefront, tenant: tenantWithLogo });
+    sendMock.mockResolvedValue({ id: 'x' });
+
+    await handlePasswordResetRequested(tenantData);
+
+    const args = sendMock.mock.calls[0]?.[0];
+    if (!args) throw new Error('sendMock was not called');
+    const html = await render(args.react);
+    expect(html).toContain('https://cdn.example/tenant.png'); // tenant logo fallback
+  });
+
+  it('propagates tenant-resolver throws (Inngest retries)', async () => {
+    resolveTenantMock.mockRejectedValue(new Error('emails: brand resolution failed — boom (tenant)'));
+    await expect(handlePasswordResetRequested(tenantData)).rejects.toThrow(/brand resolution/);
+    expect(sendMock).not.toHaveBeenCalled();
   });
 });
 

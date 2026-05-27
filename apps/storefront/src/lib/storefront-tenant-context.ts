@@ -14,8 +14,8 @@
  */
 
 import type { StorefrontTenantContext } from '@rp/auth-core/storefront-adapter';
-import { extractBrandSlug } from '@rp/auth-core/storefront-host';
-import { resolveBrandBySlug } from '@rp/auth-core/storefront-tenant-resolver';
+import { extractStorefrontSlug } from '@rp/auth-core/storefront-host';
+import { resolveStorefrontBySlug } from '@rp/auth-core/storefront-resolver';
 import { APIError } from 'better-auth';
 import { headers } from 'next/headers';
 
@@ -36,23 +36,31 @@ export async function resolveStorefrontTenantContext(): Promise<StorefrontTenant
   const host = h.get('host');
   const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
 
-  const slug = extractBrandSlug(host, baseDomain);
+  // DEL-22: resolve to a storefront (brand-type or tenant-type) per ADR-0012.
+  // Brand-host requests get `brandId`/`brandSlug` populated; tenant-host
+  // requests get them undefined. 400 only when tenant is unresolvable.
+  // Error messages preserve the "no resolvable tenant" prefix consumed by the
+  // DEL-3 AC#5 e2e regex.
+  const slug = extractStorefrontSlug(host, baseDomain);
   if (!slug) {
     badRequest(
-      `no resolvable tenant for storefront request — host=${sanitizeHost(host)} (no brand subdomain)`,
+      `no resolvable tenant for storefront request — host=${sanitizeHost(host)} (no storefront subdomain)`,
     );
   }
 
-  const brandContext = await resolveBrandBySlug(slug);
-  if (!brandContext) {
+  const sf = await resolveStorefrontBySlug(slug);
+  if (!sf) {
     badRequest(
-      `no resolvable tenant for storefront request — host=${sanitizeHost(host)} (brand "${slug}" not found or inactive)`,
+      `no resolvable tenant for storefront request — host=${sanitizeHost(host)} (storefront "${slug}" not found or inactive)`,
     );
   }
 
   return {
-    tenantId: brandContext.tenant.id,
-    brandId: brandContext.brand.id,
-    brandSlug: brandContext.brand.slug,
+    tenantId: sf.tenantId,
+    storefrontId: sf.storefrontId,
+    storefrontType: sf.storefrontType,
+    storefrontSlug: slug,
+    brandId: sf.brandId,
+    brandSlug: sf.storefrontType === 'brand' ? slug : undefined,
   };
 }

@@ -1,6 +1,12 @@
 import { expect, test } from '@playwright/test';
 import { db } from '@rp/db';
-import { brands, tenantEndUserSessions, tenantEndUsers, tenants } from '@rp/db/schema';
+import {
+  brands,
+  storefronts,
+  tenantEndUserSessions,
+  tenantEndUsers,
+  tenants,
+} from '@rp/db/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 
 /**
@@ -87,6 +93,23 @@ test.describe
         })
         .onConflictDoNothing();
       otherBrandId = await resolveBrandId(OTHER_BRAND_SLUG);
+
+      // DEL-22: post-resolver-flip, the BA tenant context resolves through
+      // `storefronts` (not `brands`). The test brand needs a matching
+      // type='brand' storefront row or the resolver will 400 with
+      // "storefront not found or inactive".
+      await db
+        .insert(storefronts)
+        .values({
+          tenantId: otherTenantId,
+          slug: OTHER_BRAND_SLUG,
+          name: 'Other Brand (DEL-3 test)',
+          type: 'brand',
+          primaryBrandId: otherBrandId,
+          brandingJson: {},
+          isActive: true,
+        })
+        .onConflictDoNothing();
     });
 
     test.afterAll(async () => {

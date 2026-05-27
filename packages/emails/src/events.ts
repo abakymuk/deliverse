@@ -6,28 +6,50 @@
  * the inferred TypeScript types are what callers `satisfies`-check against
  * at the `inngest.send(...)` call site.
  *
- * Shape per docs/specs/email-delivery.md §6:
- *   - OTP: storefront-only (always carries tenantId + brandSlug).
- *   - Password reset: discriminated union by `instance` (platform vs storefront).
+ * Shape per docs/specs/email-delivery.md §6 + docs/specs/ba-brand-optional.md (DEL-22):
+ *   - OTP: storefront-only. Brand-mode payloads carry brandSlug (legacy,
+ *     mode-less for back-compat with in-flight events). Tenant-mode payloads
+ *     carry mode: 'tenant' + storefrontId + storefrontSlug.
+ *   - Password reset: outer union of platform vs storefront; the storefront
+ *     leg is itself a union of brand-mode (legacy, mode-less) vs tenant-mode.
  *   - Email verification: discriminated union by `instance`. Today only the
  *     `platform` variant exists — storefront uses OTP for verification. The
  *     union shape is kept for forward-compat (DEL-6 spec §4 decision #1).
+ *
+ * Back-compat note (DEL-22): all brand-mode storefront payloads remain
+ * mode-less so that any in-flight Inngest events emitted by the prior
+ * deploy parse without modification. Tenant-mode is additive.
  */
 
 import { z } from 'zod';
 
-// ── OTP (storefront only — DEL-5) ─────────────────────────────────────────
+// ── OTP (storefront only — DEL-5, extended for DEL-22 tenant-mode) ────────
+
+const otpStorefrontBrand = z.object({
+  email: z.string().email(),
+  /** SENSITIVE: plaintext 6-digit code — never log, never echo to error messages. */
+  otp: z.string().regex(/^\d{6}$/),
+  type: z.enum(['otp_login', 'email_verify', 'password_reset']),
+  tenantId: z.string().uuid(),
+  brandSlug: z.string().min(1),
+  // NO `mode` field — verbatim today's shape for back-compat with queued events.
+});
+
+const otpStorefrontTenant = z.object({
+  email: z.string().email(),
+  otp: z.string().regex(/^\d{6}$/),
+  type: z.enum(['otp_login', 'email_verify', 'password_reset']),
+  tenantId: z.string().uuid(),
+  mode: z.literal('tenant'),
+  storefrontId: z.string().uuid(),
+  storefrontSlug: z.string().min(1),
+});
 
 export const otpRequestedEvent = z.object({
   name: z.literal('email.otp.requested'),
-  data: z.object({
-    email: z.string().email(),
-    /** SENSITIVE: plaintext 6-digit code — never log, never echo to error messages. */
-    otp: z.string().regex(/^\d{6}$/),
-    type: z.enum(['otp_login', 'email_verify', 'password_reset']),
-    tenantId: z.string().uuid(),
-    brandSlug: z.string().min(1),
-  }),
+  // z.union (not z.discriminatedUnion on `mode`): brand-mode payloads have
+  // no `mode` field, so the discriminator must be shape-based.
+  data: z.union([otpStorefrontBrand, otpStorefrontTenant]),
 });
 
 export type OtpRequestedEvent = z.infer<typeof otpRequestedEvent>;
@@ -47,17 +69,35 @@ const transactionalEmailCommon = z.object({
   url: z.string().url(),
 });
 
-// ── Password reset (platform + storefront) — DEL-6 ────────────────────────
+// ── Password reset (platform + storefront, brand + tenant) — DEL-6 / DEL-22 ─
+
+const platformPasswordReset = transactionalEmailCommon.extend({
+  instance: z.literal('platform'),
+});
+
+const storefrontBrandPasswordReset = transactionalEmailCommon.extend({
+  instance: z.literal('storefront'),
+  tenantId: z.string().uuid(),
+  brandSlug: z.string().min(1),
+  // NO `mode` field — verbatim today's shape for back-compat (DEL-22).
+});
+
+const storefrontTenantPasswordReset = transactionalEmailCommon.extend({
+  instance: z.literal('storefront'),
+  mode: z.literal('tenant'),
+  tenantId: z.string().uuid(),
+  storefrontId: z.string().uuid(),
+  storefrontSlug: z.string().min(1),
+});
 
 export const passwordResetRequestedEvent = z.object({
   name: z.literal('email.password_reset.requested'),
-  data: z.discriminatedUnion('instance', [
-    transactionalEmailCommon.extend({ instance: z.literal('platform') }),
-    transactionalEmailCommon.extend({
-      instance: z.literal('storefront'),
-      tenantId: z.string().uuid(),
-      brandSlug: z.string().min(1),
-    }),
+  // Outer union — platform has no `mode` and can't share a discriminator
+  // with storefront. Inner union (brand vs tenant) is shape-based so legacy
+  // brand-mode payloads (no `mode` field) still parse (DEL-22).
+  data: z.union([
+    platformPasswordReset,
+    z.union([storefrontBrandPasswordReset, storefrontTenantPasswordReset]),
   ]),
 });
 
