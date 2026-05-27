@@ -250,6 +250,7 @@ See `docs/decisions/` for full ADRs. Highlights:
 - **0004:** Two Next.js apps (not one app with routes)
 - **0005:** Doppler + Vercel (not Vercel env vars alone)
 - **0006:** Neon Postgres (not Supabase, not RDS)
+- **0012:** Storefront, Brand, Tenant, and Food Hall Architecture (target model for single-brand, multi-brand, and food-hall modes)
 
 ---
 

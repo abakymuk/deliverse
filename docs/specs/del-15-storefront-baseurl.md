@@ -13,6 +13,8 @@ Storefront-instance Better-Auth emits password-reset emails whose links point at
 
 `packages/auth-core/src/storefront.ts` does not set `baseURL` on its `betterAuth(...)` call. BA reads `process.env.BETTER_AUTH_URL` once at init and freezes it on `ctx.context.baseURL`. Doppler sets that env to the platform's URL because platform is the canonical authority. The storefront BA is multi-tenant (one instance for every brand subdomain) so a fixed `baseURL` is structurally wrong — every request from a different brand needs a different URL host.
 
+> **Evolution note.** Brand-based baseURL described in this spec is the M1 state. The **target architecture** ([ADR-0012](../decisions/0012-storefront-brand-tenant-food-hall-architecture.md)) introduces tenant-level food-hall storefronts whose baseURL must be derived from the storefront (tenant-host), not from a brand. Adding a tenant-host baseURL path is deferred to a follow-up tracked in [`docs/planning/food-hall-architecture-linear-plan.md`](../planning/food-hall-architecture-linear-plan.md); the brand-host path documented here continues to work unchanged for mode-1/mode-2 storefronts.
+
 Confirmed from installed `better-auth@1.6.11` (`dist/api/routes/password.mjs:72`):
 
 ```js
