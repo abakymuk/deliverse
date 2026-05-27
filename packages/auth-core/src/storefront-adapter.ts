@@ -20,6 +20,15 @@
  */
 
 import { APIError, type DBAdapter, type DBTransactionAdapter, type Where } from 'better-auth';
+import {
+  OTP_MAX_FAILURES,
+  checkOtpRequest,
+  extractEmailFromOtpIdentifier,
+  normalizeOtpEmail,
+  parseOtpAttemptsFromValue,
+  recordOtpFailure,
+  recordOtpThrottle,
+} from './rate-limit';
 import { deriveVerificationType } from './storefront-verification-type';
 
 export type StorefrontTenantContext = {
@@ -87,7 +96,24 @@ function wrapMethods(
             code: 'UNKNOWN_VERIFICATION_TYPE',
           });
         }
-        return inner.create({
+        // DEL-9: rate-limit OTP requests at the wrapped-adapter boundary
+        // so the check sees fully-stamped tenant context (ADR-0010 §5.1).
+        // Runs BEFORE inner.create so existing lockouts reject early.
+        // POST-create, stamps a 60s "too_frequent" lockout that survives
+        // BA's resolveOTP delete-then-retry catch path (routes.mjs:43-49).
+        // Spec: docs/specs/otp-rate-limiting.md §"BA Behavior".
+        let normalizedEmail: string | null = null;
+        if (type === 'otp_login' && identifier) {
+          const rawEmail = extractEmailFromOtpIdentifier(identifier);
+          if (rawEmail) {
+            normalizedEmail = normalizeOtpEmail(rawEmail);
+            await checkOtpRequest({ tenantId: ctx.tenantId, email: rawEmail });
+          }
+          // If we couldn't extract an email, fall through — let inner.create
+          // proceed unthrottled rather than block on a malformed identifier.
+        }
+
+        const createPromise = inner.create({
           model,
           data: {
             ...data,
@@ -98,6 +124,31 @@ function wrapMethods(
           select,
           forceAllowId,
         });
+
+        if (normalizedEmail) {
+          const ne = normalizedEmail;
+          // Fire-and-forget: stamp the 60s lockout only if inner.create
+          // resolved (don't block on a failed write). Errors logged but
+          // not propagated — would otherwise turn a successful OTP send
+          // into a 500.
+          void createPromise.then(
+            () =>
+              recordOtpThrottle({ tenantId: ctx.tenantId, identifier: ne }).catch(
+                (err) => {
+                  console.error('[DEL-9] recordOtpThrottle failed', err);
+                },
+              ),
+            () => {
+              /* create rejected; no throttle to record */
+            },
+          );
+        }
+
+        // Cast through `as never`: the const intermediate above loses
+        // BA's `<T, R = T>` generic binding. The runtime value is exactly
+        // what `return inner.create({...})` would yield in the other
+        // branches; this assertion just papers over the inference gap.
+        return createPromise as never;
       }
       if (model === 'account') {
         // DEL-12: stamps `tenantId` on the credential or OAuth account row.
@@ -165,6 +216,39 @@ function wrapMethods(
     async update({ model, where, update }) {
       if (SCOPED_MODELS.has(model)) {
         const ctx = await resolveTenantContext();
+
+        // DEL-9: detect BA's failed-OTP attempt counter crossing
+        // OTP_MAX_FAILURES and stamp a tenant_otp_lockouts row BEFORE BA's
+        // next request deletes the verification (email-otp/routes.mjs:245-247).
+        // We pull the identifier from the WHERE clause rather than the update
+        // result — that avoids serializing the inner.update call and lets us
+        // preserve its generic return type. Fire-and-forget: recordOtpFailure
+        // runs in parallel with the inner.update and must not block BA's
+        // response on a lockout-write failure (spec §Edge Cases #8).
+        if (model === 'verification') {
+          const updatedValue = (update as { value?: string }).value;
+          if (typeof updatedValue === 'string') {
+            const attempts = parseOtpAttemptsFromValue(updatedValue);
+            if (attempts >= OTP_MAX_FAILURES) {
+              const identifier = where?.find(
+                (w): w is typeof w & { value: string } =>
+                  w.field === 'identifier' && typeof w.value === 'string',
+              )?.value;
+              if (identifier?.startsWith('sign-in-otp-')) {
+                const rawEmail = extractEmailFromOtpIdentifier(identifier);
+                if (rawEmail) {
+                  void recordOtpFailure({
+                    tenantId: ctx.tenantId,
+                    identifier: normalizeOtpEmail(rawEmail),
+                  }).catch((err) => {
+                    console.error('[DEL-9] recordOtpFailure failed', err);
+                  });
+                }
+              }
+            }
+          }
+        }
+
         return inner.update({
           model,
           where: withTenantWhere(where, ctx.tenantId),
