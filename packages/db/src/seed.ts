@@ -15,7 +15,7 @@
  */
 
 import { hashPassword } from '@better-auth/utils/password';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
 import {
   brands,
@@ -73,6 +73,12 @@ async function seed() {
 
   // === Platform account (BA credential shape — providerId singular, accountId = user.id) ===
   // Full composite unique on (provider_id, account_id).
+  //
+  // DEL-16: was `onConflictDoNothing` — re-running seed with a new
+  // `SEED_ADMIN_PASSWORD` would silently keep the old password. Now
+  // `onConflictDoUpdate` rotates the password idempotently on every
+  // re-seed, so password rotation is just "bump Doppler + re-run pnpm
+  // db:seed" without a manual DELETE step.
   await db
     .insert(platformAccounts)
     .values({
@@ -81,8 +87,12 @@ async function seed() {
       accountId: admin.id,
       password: passwordHash,
     })
-    .onConflictDoNothing({
+    .onConflictDoUpdate({
       target: [platformAccounts.providerId, platformAccounts.accountId],
+      set: {
+        password: passwordHash,
+        updatedAt: sql`now()`,
+      },
     });
 
   // === Tenant ===
