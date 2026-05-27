@@ -21,6 +21,7 @@ import { useState } from 'react';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { Button } from '@rp/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import {
@@ -50,7 +51,7 @@ type Mode = 'otp' | 'password';
 export function LoginForm() {
   const [mode, setMode] = useState<Mode>('otp');
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') ?? '/account';
+  const next = safeNextPath(searchParams.get('next'), '/account');
 
   function toggleMode() {
     setMode((m) => (m === 'otp' ? 'password' : 'otp'));
@@ -186,7 +187,6 @@ function PasswordForm({
   next: string;
   onToggleMode: () => void;
 }) {
-  const router = useRouter();
   const [googleLoading, setGoogleLoading] = useState(false);
 
   const {
@@ -214,7 +214,9 @@ function PasswordForm({
         return;
       }
 
-      router.push(next as Route);
+      // BA's redirect plugin handles navigation via window.location.href on
+      // success — see DEL-17 note in platform login-form.tsx for the cookie-
+      // persistence rationale.
     } catch (err) {
       setError('root', {
         message: err instanceof Error ? err.message : 'Unknown error',

@@ -1,5 +1,5 @@
-import { type NextRequest, NextResponse } from 'next/server';
 import { getSessionCookie } from 'better-auth/cookies';
+import { type NextRequest, NextResponse } from 'next/server';
 
 /**
  * Auth proxy for the platform app (Next 15.5+; was middleware).
@@ -12,13 +12,7 @@ import { getSessionCookie } from 'better-auth/cookies';
  * adds DB round-trip to every request.
  */
 
-const PUBLIC_PATHS = [
-  '/login',
-  '/signup',
-  '/forgot-password',
-  '/reset-password',
-  '/verify-email',
-];
+const PUBLIC_PATHS = ['/login', '/signup', '/forgot-password', '/reset-password', '/verify-email'];
 
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -33,8 +27,11 @@ export function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Check session cookie
-  const sessionCookie = getSessionCookie(request);
+  // Check session cookie. Pass the cookiePrefix that platform BA is configured
+  // with (packages/auth-core/src/platform.ts → advanced.cookiePrefix); otherwise
+  // getSessionCookie defaults to 'better-auth' and never matches our cookie,
+  // bouncing every authenticated request back to /login?next=... (DEL-17).
+  const sessionCookie = getSessionCookie(request, { cookiePrefix: 'rp_platform' });
   if (!sessionCookie) {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('next', pathname);
