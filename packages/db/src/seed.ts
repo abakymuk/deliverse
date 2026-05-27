@@ -4,14 +4,27 @@
  * Usage:
  *   doppler run -- pnpm db:seed
  *
- * Dataset (locked by docs/specs/seed-data.md):
+ * Dataset (locked by docs/specs/seed-data.md + docs/specs/commerce-schema-v1.md):
  *   - 1 admin (admin@test.local, owner of the seeded tenant)
  *   - 1 tenant (hospitality-group)
  *   - 2 brands (pizza-express, burger-heaven)
  *   - 2 locations (Downtown Kitchen, Eastside Kitchen)
  *   - 2 location_brands rows (Downtown serves both brands — dark-kitchen shape)
+ *   - 2 storefronts (one per brand — DEL-19)
+ *   - 2 menus (one per brand — DEL-24)
+ *   - 4 menu_items (2 per menu — DEL-24)
+ *
+ * Test fixtures (gated on SEED_TEST_FIXTURES=1):
+ *   - 1 secondary tenant (other-co-test) with brand + storefront (DEL-8)
+ *   - 1 test end-user (cart-test@deliverse.test) under hospitality-group (DEL-24)
+ *   - 1 multi-brand cart with 2 cart_items (mixed brand_id) for that user (DEL-24)
  *
  * Idempotent: safe to run repeatedly. Re-runs never duplicate, never error.
+ *
+ * Seed snapshots are insert-only (`onConflictDoNothing`). Re-running after
+ * editing canonical menu_item prices does NOT rotate priceCents. Switch to
+ * `onConflictDoUpdate` (precedent: platformAccounts at line ~83) if price
+ * rotation becomes a need.
  */
 
 import { hashPassword } from '@better-auth/utils/password';
@@ -19,11 +32,16 @@ import { and, eq, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
 import {
   brands,
+  cartItems,
+  carts,
   locationBrands,
   locations,
+  menuItems,
+  menus,
   platformAccounts,
   platformUsers,
   storefronts,
+  tenantEndUsers,
   tenantMemberships,
   tenants,
 } from './schema';
@@ -42,6 +60,25 @@ const BRAND_PIZZA_SLUG = 'pizza-express';
 const BRAND_PIZZA_NAME = 'Pizza Express';
 const BRAND_BURGER_SLUG = 'burger-heaven';
 const BRAND_BURGER_NAME = 'Burger Heaven';
+
+// DEL-24: deterministic UUIDs for the canonical commerce dataset and the
+// SEED_TEST_FIXTURES multi-brand cart fixture. Pattern matches the
+// locations IDs above — keeps the seed idempotent without depending on
+// partial-unique constraints (menus / menu_items / carts / cart_items
+// have no natural unique key).
+const PIZZA_MENU_ID = '00000000-0000-4000-8000-000000000010';
+const BURGER_MENU_ID = '00000000-0000-4000-8000-000000000011';
+const PIZZA_ITEM_MARGHERITA_ID = '00000000-0000-4000-8000-000000000020';
+const PIZZA_ITEM_PEPPERONI_ID = '00000000-0000-4000-8000-000000000021';
+const BURGER_ITEM_CLASSIC_ID = '00000000-0000-4000-8000-000000000022';
+const BURGER_ITEM_CHEESE_ID = '00000000-0000-4000-8000-000000000023';
+
+// SEED_TEST_FIXTURES (DEL-24) — multi-brand cart fixture.
+const CART_TEST_USER_EMAIL = 'cart-test@deliverse.test';
+const CART_TEST_USER_NAME = 'Cart Test User';
+const CART_FIXTURE_ID = '00000000-0000-4000-8000-000000000030';
+const CART_ITEM_PIZZA_ID = '00000000-0000-4000-8000-000000000040';
+const CART_ITEM_BURGER_ID = '00000000-0000-4000-8000-000000000041';
 
 async function seed() {
   const password = process.env.SEED_ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD;
@@ -231,8 +268,70 @@ async function seed() {
     ])
     .onConflictDoNothing();
 
+  // === Menus + menu_items (DEL-24) ===
+  // One menu per brand, two items per menu. No natural unique key on these
+  // tables — idempotency via deterministic UUID PKs (matches locations
+  // pattern above). Seed snapshots are insert-only — see file header.
+  await db
+    .insert(menus)
+    .values([
+      {
+        id: PIZZA_MENU_ID,
+        brandId: pizza.id,
+        name: 'Pizza Menu',
+        description: 'Wood-fired pies and sides.',
+        isActive: true,
+      },
+      {
+        id: BURGER_MENU_ID,
+        brandId: burger.id,
+        name: 'Burger Menu',
+        description: 'Smash burgers and fries.',
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing({ target: menus.id });
+
+  await db
+    .insert(menuItems)
+    .values([
+      {
+        id: PIZZA_ITEM_MARGHERITA_ID,
+        menuId: PIZZA_MENU_ID,
+        name: 'Margherita',
+        description: 'Tomato, mozzarella, basil.',
+        priceCents: 1400,
+        isActive: true,
+      },
+      {
+        id: PIZZA_ITEM_PEPPERONI_ID,
+        menuId: PIZZA_MENU_ID,
+        name: 'Pepperoni',
+        description: 'Tomato, mozzarella, pepperoni.',
+        priceCents: 1600,
+        isActive: true,
+      },
+      {
+        id: BURGER_ITEM_CLASSIC_ID,
+        menuId: BURGER_MENU_ID,
+        name: 'Classic Burger',
+        description: 'Beef, lettuce, tomato, onion.',
+        priceCents: 1200,
+        isActive: true,
+      },
+      {
+        id: BURGER_ITEM_CHEESE_ID,
+        menuId: BURGER_MENU_ID,
+        name: 'Cheeseburger',
+        description: 'Classic + American cheese.',
+        priceCents: 1400,
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing({ target: menuItems.id });
+
   console.info(
-    `Seeded admin=${ADMIN_EMAIL} (${admin.id}), tenant=${TENANT_SLUG} (${tenant.id}), brands=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], locations=[Downtown, Eastside], storefronts=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}]`,
+    `Seeded admin=${ADMIN_EMAIL} (${admin.id}), tenant=${TENANT_SLUG} (${tenant.id}), brands=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], locations=[Downtown, Eastside], storefronts=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], menus=[Pizza, Burger], menu_items=4`,
   );
 
   // === Test-only fixtures (DEL-8) ===
@@ -299,6 +398,79 @@ async function seed() {
 
       console.info(
         `Seeded test fixtures: tenant=other-co-test (${otherTenant.id}), brand=other-brand-test, storefront=other-brand-test`,
+      );
+    }
+
+    // === DEL-24: multi-brand cart fixture under hospitality-group ===
+    // AC#7 demands "at least one tenant has multiple brands sharing one cart
+    // with mixed brand_id line items." This block sets up exactly that. It
+    // attaches to the canonical hospitality-group tenant (already has pizza
+    // + burger brands sharing Downtown location), so no new tenant is needed.
+    //
+    // Test end-user uses bare onConflictDoNothing() because tenant_end_users
+    // has a partial-unique index on (tenant_id, email) WHERE deleted_at IS
+    // NULL — matches the platformUsers pattern above.
+    await db
+      .insert(tenantEndUsers)
+      .values({
+        tenantId: tenant.id,
+        email: CART_TEST_USER_EMAIL,
+        name: CART_TEST_USER_NAME,
+        emailVerified: true,
+      })
+      .onConflictDoNothing();
+
+    const [cartTestUser] = await db
+      .select({ id: tenantEndUsers.id })
+      .from(tenantEndUsers)
+      .where(
+        and(
+          eq(tenantEndUsers.tenantId, tenant.id),
+          eq(tenantEndUsers.email, CART_TEST_USER_EMAIL),
+          isNull(tenantEndUsers.deletedAt),
+        ),
+      )
+      .limit(1);
+
+    if (cartTestUser) {
+      // One cart, two cart_items (mixed brand_id). Deterministic UUIDs for
+      // idempotency.
+      await db
+        .insert(carts)
+        .values({
+          id: CART_FIXTURE_ID,
+          tenantId: tenant.id,
+          locationId: DOWNTOWN_LOCATION_ID,
+          tenantEndUserId: cartTestUser.id,
+          status: 'active',
+          fulfillmentType: 'pickup',
+        })
+        .onConflictDoNothing({ target: carts.id });
+
+      await db
+        .insert(cartItems)
+        .values([
+          {
+            id: CART_ITEM_PIZZA_ID,
+            cartId: CART_FIXTURE_ID,
+            brandId: pizza.id,
+            menuItemId: PIZZA_ITEM_MARGHERITA_ID,
+            quantity: 1,
+            unitPriceCents: 1400,
+          },
+          {
+            id: CART_ITEM_BURGER_ID,
+            cartId: CART_FIXTURE_ID,
+            brandId: burger.id,
+            menuItemId: BURGER_ITEM_CLASSIC_ID,
+            quantity: 1,
+            unitPriceCents: 1200,
+          },
+        ])
+        .onConflictDoNothing({ target: cartItems.id });
+
+      console.info(
+        `Seeded DEL-24 fixture: cart=${CART_FIXTURE_ID} under ${TENANT_SLUG} for ${CART_TEST_USER_EMAIL}, cart_items=[pizza:${BRAND_PIZZA_SLUG}, burger:${BRAND_BURGER_SLUG}]`,
       );
     }
   }
