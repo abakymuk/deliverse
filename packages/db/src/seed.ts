@@ -206,6 +206,44 @@ async function seed() {
   console.info(
     `Seeded admin=${ADMIN_EMAIL} (${admin.id}), tenant=${TENANT_SLUG} (${tenant.id}), brands=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], locations=[Downtown, Eastside]`,
   );
+
+  // === Test-only fixtures (DEL-8) ===
+  // Gated on SEED_TEST_FIXTURES=1 so the canonical seed stays minimal for
+  // staging/prd. CI's e2e job sets the flag to provision a second tenant
+  // needed by the storefront tenant-isolation Playwright test.
+  if (process.env.SEED_TEST_FIXTURES === '1') {
+    await db
+      .insert(tenants)
+      .values({
+        slug: 'other-co-test',
+        name: 'Other Co (Test)',
+        status: 'active',
+      })
+      .onConflictDoNothing();
+
+    const [otherTenant] = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(and(eq(tenants.slug, 'other-co-test'), isNull(tenants.deletedAt)))
+      .limit(1);
+
+    if (otherTenant) {
+      await db
+        .insert(brands)
+        .values({
+          tenantId: otherTenant.id,
+          slug: 'other-brand-test',
+          name: 'Other Brand (Test)',
+          isActive: true,
+          brandingJson: {},
+        })
+        .onConflictDoNothing();
+
+      console.info(
+        `Seeded test fixtures: tenant=other-co-test (${otherTenant.id}), brand=other-brand-test`,
+      );
+    }
+  }
 }
 
 seed()
