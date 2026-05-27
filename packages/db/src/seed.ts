@@ -4,15 +4,27 @@
  * Usage:
  *   doppler run -- pnpm db:seed
  *
- * Dataset (locked by docs/specs/seed-data.md + docs/specs/commerce-schema-v1.md):
- *   - 1 admin (admin@test.local, owner of the seeded tenant)
- *   - 1 tenant (hospitality-group)
- *   - 2 brands (pizza-express, burger-heaven)
- *   - 2 locations (Downtown Kitchen, Eastside Kitchen)
- *   - 2 location_brands rows (Downtown serves both brands — dark-kitchen shape)
- *   - 2 storefronts (one per brand — DEL-19)
- *   - 2 menus (one per brand — DEL-24)
- *   - 4 menu_items (2 per menu — DEL-24)
+ * Dataset (locked by docs/specs/seed-data.md + docs/specs/commerce-schema-v1.md +
+ * docs/specs/food-hall-storefront.md):
+ *
+ *   Hospitality Group (mode-1/2 brand storefronts):
+ *     - 1 admin (admin@test.local, owner of hospitality-group)
+ *     - 1 tenant (hospitality-group)
+ *     - 2 brands (pizza-express, burger-heaven)
+ *     - 2 locations (Downtown Kitchen, Eastside Kitchen)
+ *     - 2 location_brands rows (Downtown serves both brands — dark-kitchen)
+ *     - 2 storefronts (one per brand — DEL-19)
+ *     - 2 menus (one per brand — DEL-24)
+ *     - 4 menu_items (2 per menu — DEL-24)
+ *
+ *   OOMI Kitchen (mode-3 food-hall demo — DEL-25):
+ *     - 1 tenant (oomi-kitchen-test)
+ *     - 2 brands (oomi-burger-test, oomi-pizza-test)
+ *     - 1 location (oomi-kitchen — single location for food-hall v1)
+ *     - 2 location_brands rows (dark-kitchen — one location serves both brands)
+ *     - 3 storefronts (1 tenant-type entry + 2 brand-type)
+ *     - 2 menus (one per OOMI brand)
+ *     - 4 menu_items (2 per menu)
  *
  * Test fixtures (gated on SEED_TEST_FIXTURES=1):
  *   - 1 secondary tenant (other-co-test) with brand + storefront (DEL-8)
@@ -79,6 +91,35 @@ const CART_TEST_USER_NAME = 'Cart Test User';
 const CART_FIXTURE_ID = '00000000-0000-4000-8000-000000000030';
 const CART_ITEM_PIZZA_ID = '00000000-0000-4000-8000-000000000040';
 const CART_ITEM_BURGER_ID = '00000000-0000-4000-8000-000000000041';
+
+// DEL-25: OOMI Kitchen demo tenant (canonical seed — ships to stg/prd).
+// `-test` suffix matches the established quarantine convention
+// (`other-co-test`, `other-brand-test`) and reserves the bare
+// `oomi-kitchen` slug for any future real customer. Decision logged in
+// docs/specs/food-hall-storefront.md § "Intentional Deviation from AC#7".
+const OOMI_TENANT_SLUG = 'oomi-kitchen-test';
+// ASCII-only — the storefront proxy injects this as an HTTP header
+// (`x-storefront-name`), which requires ByteString-encodable values (< 256).
+// Any non-ASCII char (em-dash, etc.) crashes the proxy with "Cannot convert
+// argument to a ByteString".
+const OOMI_TENANT_NAME = 'OOMI Kitchen Test';
+const OOMI_BURGER_SLUG = 'oomi-burger-test';
+const OOMI_BURGER_NAME = 'OOMI Burger';
+const OOMI_PIZZA_SLUG = 'oomi-pizza-test';
+const OOMI_PIZZA_NAME = 'OOMI Pizza';
+// Deterministic UUIDs for the OOMI dataset (range 50–73 to avoid
+// collisions with the hospitality-group + DEL-24 cart-fixture UUIDs).
+const OOMI_LOCATION_ID = '00000000-0000-4000-8000-000000000050';
+const OOMI_BURGER_MENU_ID = '00000000-0000-4000-8000-000000000060';
+const OOMI_PIZZA_MENU_ID = '00000000-0000-4000-8000-000000000061';
+const OOMI_BURGER_ITEM_SMASH_ID = '00000000-0000-4000-8000-000000000070';
+const OOMI_BURGER_ITEM_TRUFFLE_ID = '00000000-0000-4000-8000-000000000071';
+const OOMI_PIZZA_ITEM_MARGHERITA_ID = '00000000-0000-4000-8000-000000000072';
+const OOMI_PIZZA_ITEM_TRUFFLE_ID = '00000000-0000-4000-8000-000000000073';
+// Distinct primary colors for the OOMI brand themes so the brand
+// subsections are visibly different from the food-hall shell defaults.
+const OOMI_BURGER_PRIMARY_HEX = '#dc2626'; // warm red — burger
+const OOMI_PIZZA_PRIMARY_HEX = '#16a34a'; // green — pizza
 
 async function seed() {
   const password = process.env.SEED_ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD;
@@ -332,6 +373,216 @@ async function seed() {
 
   console.info(
     `Seeded admin=${ADMIN_EMAIL} (${admin.id}), tenant=${TENANT_SLUG} (${tenant.id}), brands=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], locations=[Downtown, Eastside], storefronts=[${BRAND_PIZZA_SLUG}, ${BRAND_BURGER_SLUG}], menus=[Pizza, Burger], menu_items=4`,
+  );
+
+  // === OOMI Kitchen — canonical food-hall demo tenant (DEL-25) ===
+  //
+  // mode-3 showcase tenant. Lives in canonical seed (not SEED_TEST_FIXTURES)
+  // per the M3 Definition of Done: "live for one tenant in prd". `-test`
+  // suffix quarantines from real customer data and reserves the bare
+  // `oomi-kitchen` slug for any future real customer.
+  await db
+    .insert(tenants)
+    .values({
+      slug: OOMI_TENANT_SLUG,
+      name: OOMI_TENANT_NAME,
+      status: 'active',
+    })
+    .onConflictDoNothing();
+
+  const [oomiTenant] = await db
+    .select({ id: tenants.id })
+    .from(tenants)
+    .where(and(eq(tenants.slug, OOMI_TENANT_SLUG), isNull(tenants.deletedAt)))
+    .limit(1);
+
+  if (!oomiTenant) {
+    throw new Error(
+      `Failed to insert or find OOMI tenant (${OOMI_TENANT_SLUG})`,
+    );
+  }
+
+  // OOMI brands — distinct primary colors so brand subsections are
+  // visibly different from the tenant-shell defaults.
+  await db
+    .insert(brands)
+    .values([
+      {
+        tenantId: oomiTenant.id,
+        slug: OOMI_BURGER_SLUG,
+        name: OOMI_BURGER_NAME,
+        isActive: true,
+        brandingJson: { primary: OOMI_BURGER_PRIMARY_HEX },
+      },
+      {
+        tenantId: oomiTenant.id,
+        slug: OOMI_PIZZA_SLUG,
+        name: OOMI_PIZZA_NAME,
+        isActive: true,
+        brandingJson: { primary: OOMI_PIZZA_PRIMARY_HEX },
+      },
+    ])
+    .onConflictDoNothing();
+
+  const oomiBrandRows = await db
+    .select({ id: brands.id, slug: brands.slug })
+    .from(brands)
+    .where(and(eq(brands.tenantId, oomiTenant.id), isNull(brands.deletedAt)));
+
+  const oomiBurger = oomiBrandRows.find((b) => b.slug === OOMI_BURGER_SLUG);
+  const oomiPizza = oomiBrandRows.find((b) => b.slug === OOMI_PIZZA_SLUG);
+
+  if (!oomiBurger || !oomiPizza) {
+    throw new Error('Failed to find seeded OOMI brands');
+  }
+
+  // OOMI location — single location for food-hall v1 (multi-location
+  // food halls are a non-goal per DEL-25).
+  await db
+    .insert(locations)
+    .values({
+      id: OOMI_LOCATION_ID,
+      tenantId: oomiTenant.id,
+      name: 'OOMI Kitchen',
+      addressLine1: '500 Food Hall Plaza',
+      city: 'Brooklyn',
+      state: 'NY',
+      postalCode: '11201',
+      country: 'US',
+    })
+    .onConflictDoNothing({ target: locations.id });
+
+  // OOMI location_brands — dark-kitchen: one physical kitchen serves
+  // both OOMI brands.
+  await db
+    .insert(locationBrands)
+    .values([
+      { locationId: OOMI_LOCATION_ID, brandId: oomiBurger.id },
+      { locationId: OOMI_LOCATION_ID, brandId: oomiPizza.id },
+    ])
+    .onConflictDoNothing({
+      target: [locationBrands.locationId, locationBrands.brandId],
+    });
+
+  // OOMI storefronts — 1 tenant-type (food-hall entry, no primary_brand_id)
+  // + 2 brand-type (so individual brand subdomains also work in mode-2).
+  // Same tenant owns all three; cart spans brands within tenant.
+  await db
+    .insert(storefronts)
+    .values([
+      {
+        tenantId: oomiTenant.id,
+        slug: OOMI_TENANT_SLUG,
+        name: OOMI_TENANT_NAME,
+        type: 'tenant',
+        primaryBrandId: null,
+        brandingJson: {},
+        isActive: true,
+      },
+      {
+        tenantId: oomiTenant.id,
+        slug: OOMI_BURGER_SLUG,
+        name: OOMI_BURGER_NAME,
+        type: 'brand',
+        primaryBrandId: oomiBurger.id,
+        brandingJson: { primary: OOMI_BURGER_PRIMARY_HEX },
+        isActive: true,
+      },
+      {
+        tenantId: oomiTenant.id,
+        slug: OOMI_PIZZA_SLUG,
+        name: OOMI_PIZZA_NAME,
+        type: 'brand',
+        primaryBrandId: oomiPizza.id,
+        brandingJson: { primary: OOMI_PIZZA_PRIMARY_HEX },
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing();
+
+  // OOMI menus — one per brand
+  await db
+    .insert(menus)
+    .values([
+      {
+        id: OOMI_BURGER_MENU_ID,
+        brandId: oomiBurger.id,
+        name: 'OOMI Burger Menu',
+        description: 'Smash burgers and sides.',
+        isActive: true,
+      },
+      {
+        id: OOMI_PIZZA_MENU_ID,
+        brandId: oomiPizza.id,
+        name: 'OOMI Pizza Menu',
+        description: 'Wood-fired pies and sides.',
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing({ target: menus.id });
+
+  // OOMI menu items
+  await db
+    .insert(menuItems)
+    .values([
+      {
+        id: OOMI_BURGER_ITEM_SMASH_ID,
+        menuId: OOMI_BURGER_MENU_ID,
+        name: 'Smash Burger',
+        description: 'Beef, lettuce, tomato, onion.',
+        priceCents: 1300,
+        isActive: true,
+      },
+      {
+        id: OOMI_BURGER_ITEM_TRUFFLE_ID,
+        menuId: OOMI_BURGER_MENU_ID,
+        name: 'Truffle Burger',
+        description: 'Truffle mayo, mushroom, swiss.',
+        priceCents: 1700,
+        isActive: true,
+      },
+      {
+        id: OOMI_PIZZA_ITEM_MARGHERITA_ID,
+        menuId: OOMI_PIZZA_MENU_ID,
+        name: 'Margherita',
+        description: 'Tomato, mozzarella, basil.',
+        priceCents: 1400,
+        isActive: true,
+      },
+      {
+        id: OOMI_PIZZA_ITEM_TRUFFLE_ID,
+        menuId: OOMI_PIZZA_MENU_ID,
+        name: 'Truffle Pizza',
+        description: 'Truffle oil, mushroom, ricotta.',
+        priceCents: 1900,
+        isActive: true,
+      },
+    ])
+    .onConflictDoNothing({ target: menuItems.id });
+
+  // DEL-25 one-off convergence — if a previous run inserted the OOMI rows
+  // with a non-ASCII name (em-dash variant), the storefront proxy crashes
+  // when it tries to inject the name as an HTTP header. `onConflictDoNothing`
+  // above would leave the stale name in place forever. Idempotent UPDATEs
+  // converge any prior rows to the current ASCII name. No-op on rows that
+  // already have the right name. Safe to leave in seed.ts permanently.
+  await db
+    .update(tenants)
+    .set({ name: OOMI_TENANT_NAME, updatedAt: sql`now()` })
+    .where(and(eq(tenants.slug, OOMI_TENANT_SLUG), isNull(tenants.deletedAt)));
+  await db
+    .update(storefronts)
+    .set({ name: OOMI_TENANT_NAME, updatedAt: sql`now()` })
+    .where(
+      and(
+        eq(storefronts.slug, OOMI_TENANT_SLUG),
+        eq(storefronts.type, 'tenant'),
+        isNull(storefronts.deletedAt),
+      ),
+    );
+
+  console.info(
+    `Seeded OOMI Kitchen demo tenant: tenant=${OOMI_TENANT_SLUG} (${oomiTenant.id}), brands=[${OOMI_BURGER_SLUG}, ${OOMI_PIZZA_SLUG}], location=oomi-kitchen, storefronts=[${OOMI_TENANT_SLUG}(tenant), ${OOMI_BURGER_SLUG}(brand), ${OOMI_PIZZA_SLUG}(brand)], menus=[OOMI Burger Menu, OOMI Pizza Menu], menu_items=4`,
   );
 
   // === Test-only fixtures (DEL-8) ===
