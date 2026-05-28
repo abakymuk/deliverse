@@ -2,16 +2,17 @@
  * Storefront tenant-scoped Drizzle adapter wrapper.
  *
  * Wraps a Better-Auth `DBAdapter` so that:
- *   - `create` for user/session/verification stamps tenant context
+ *   - `create` for user/session/verification/account stamps tenant context
  *     onto the data
- *   - read + mutation methods for user/verification append a
- *     `tenantId = ctx.tenantId` predicate to the `where` clause
- *   - session lookups by `token` and the `account` model pass through
+ *   - read + mutation methods for user/verification/account/session append
+ *     a `tenantId = ctx.tenantId` predicate to the `where` clause
  *
  * The transaction method wraps the trx adapter recursively so operations
  * inside `runWithTransaction` (e.g. BA's `createOAuthUser`) stay scoped.
  *
- * Spec: docs/specs/storefront-tenant-scoping.md §5.
+ * Spec: docs/specs/storefront-tenant-scoping.md §5 (M1 brand-required) +
+ *       docs/specs/ba-brand-optional.md (DEL-22 brand-optional resolver) +
+ *       docs/specs/session-model-scoped.md (post-DEL-26 session scoping).
  * ADR: docs/decisions/0010-tenant-scoping-injection.md.
  *
  * The caller-supplied `resolveTenantContext` is called once per wrapped
@@ -69,7 +70,13 @@ export type StorefrontTenantContext = {
 
 export type ResolveTenantContext = () => Promise<StorefrontTenantContext>;
 
-const SCOPED_MODELS = new Set(['user', 'verification', 'account']);
+// Defense-in-depth: every storefront-scoped model gets the `tenant_id = ctx.tenantId`
+// predicate appended on reads + mutations. The set grows as new tables are
+// added — DEL-3 shipped {user, verification}, DEL-12 added account,
+// session-model-scoped (post-DEL-26) adds session. See
+// docs/specs/session-model-scoped.md for why session needed its own
+// tenant_id column rather than inheriting via tenantEndUserId join.
+const SCOPED_MODELS = new Set(['user', 'verification', 'account', 'session']);
 
 function tenantPredicate(tenantId: string): Where {
   return {
@@ -103,15 +110,25 @@ function wrapMethods(
       }
       if (model === 'session') {
         const ctx = await resolveTenantContext();
-        // DEL-21: stamp UUID for brand-mode sessions; explicit NULL for
-        // tenant-mode (food-hall) sessions. The `?? null` is explicit by
-        // design — relying on Drizzle's undefined-omission behavior would
+        // DEL-21: stamp `currentBrandId` UUID for brand-mode sessions; explicit
+        // NULL for tenant-mode (food-hall) sessions. The `?? null` is explicit
+        // by design — relying on Drizzle's undefined-omission behavior would
         // produce ambiguous SQL and silently regress if a future maintainer
-        // restructures the spread. The branch where `ctx.brandId` is undefined
-        // is unreachable in production until DEL-22 flips the resolver.
+        // restructures the spread.
+        //
+        // session-model-scoped (post-DEL-26): also stamp `tenantId` so the
+        // session row carries the tenant boundary independently of the
+        // joined user row. Defense-in-depth against cross-tenant cookie
+        // replay (without this, BA's relational session+user lookup would
+        // return cross-tenant data because the wrapper's user-side predicate
+        // never runs as a separate hop).
         return inner.create({
           model,
-          data: { ...data, currentBrandId: ctx.brandId ?? null },
+          data: {
+            ...data,
+            tenantId: ctx.tenantId,
+            currentBrandId: ctx.brandId ?? null,
+          },
           select,
           forceAllowId,
         });

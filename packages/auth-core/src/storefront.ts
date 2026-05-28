@@ -99,9 +99,41 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
           required: false,
           input: false,
         },
+        // Session tenant scoping — closes the cross-tenant cookie-replay
+        // defense-in-depth gap surfaced during DEL-26. `input: false` mirrors
+        // the DEL-12 `account.additionalFields.tenantId` pattern: external
+        // HTTP callers cannot spoof, and BA's factory `transformInput` only
+        // preserves declared additionalFields by name (without this
+        // registration, the wrapper-injected `data.tenantId` would be
+        // dropped). See docs/specs/session-model-scoped.md.
+        tenantId: {
+          type: 'string',
+          required: false,
+          input: false,
+        },
       },
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24 * 7,
+      // NOTE (session-model-scoped, post-DEL-26): cookieCache stays enabled.
+      // BA's `dist/api/routes/session.mjs` short-circuits `get-session` by
+      // decrypting the session payload from a signed `session_data` cookie
+      // (5min TTL) WITHOUT calling the adapter — so the SCOPED_MODELS
+      // extension for session and its tenant predicate do not apply on
+      // cookieCache hits. A cross-tenant cookie replay during the cache
+      // window still returns the source-tenant payload. Disabling
+      // cookieCache forces a DB lookup that goes through the wrapper, but
+      // it also breaks the post-server-action-redirect render path used by
+      // the order detail page (Next.js 16 drops the storefront subdomain
+      // from the `Host` header for that specific render — the page comment
+      // at `apps/storefront/src/app/(shop)/orders/[orderId]/page.tsx`
+      // documents this quirk). Trade-off accepted: keep the perf
+      // optimisation + the workaround, accept the bounded cross-tenant
+      // exposure window. The schema migration + write-layer stamping in
+      // this fix still positions us for a proper closure once a follow-up
+      // addresses the cookieCache cross-tenant path (e.g., via the BA
+      // `cookieCache.version` callback returning the current tenant ID, or
+      // a Next.js fix for the redirect-render Host drop). See
+      // docs/specs/session-model-scoped.md § "Open Questions".
       cookieCache: {
         enabled: true,
         maxAge: 60 * 5,
