@@ -63,3 +63,35 @@ export function extractStorefrontSlug(
   if (!storefrontSlug || RESERVED_SUBDOMAINS.has(storefrontSlug)) return null;
   return storefrontSlug;
 }
+
+/**
+ * Extract the `host` (incl. port) component from a full URL string such as a
+ * `Referer` or `Origin` header value. Returns null for any non-absolute URL,
+ * empty string, or null/undefined input.
+ *
+ * Used by the resolver + proxy bare-host fallback (see
+ * `docs/specs/cookie-cache-tenant-version.md` AC#3 + AC#4) to recover the
+ * storefront slug from Referer/Origin when `Host` was dropped by Next.js 16
+ * on the post-server-action-redirect render. The returned `host` is then
+ * passed to {@link extractStorefrontSlug} — same extractor, same matchers.
+ *
+ * Examples:
+ *   extractHostFromUrl('https://oomi-kitchen.deliverse.app/checkout')
+ *     → 'oomi-kitchen.deliverse.app'
+ *   extractHostFromUrl('http://pizza-express.localhost:3001/')
+ *     → 'pizza-express.localhost:3001'
+ *   extractHostFromUrl('not a url')   → null
+ *   extractHostFromUrl(null)          → null
+ *   extractHostFromUrl('')            → null
+ */
+export function extractHostFromUrl(
+  value: string | null | undefined,
+): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.host || null;
+  } catch {
+    return null;
+  }
+}

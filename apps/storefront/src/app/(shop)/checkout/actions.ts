@@ -10,6 +10,7 @@ import {
   orders,
 } from '@rp/db/schema';
 import { safeNextPath } from '@rp/auth-core/safe-next-path';
+import { appendEvent } from '@rp/events/writer';
 import { and, asc, eq } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
@@ -137,6 +138,30 @@ export async function placeOrderAction(formData: FormData): Promise<void> {
         totalCents: l.cartItemUnitPriceCents * l.cartItemQty,
       })),
     );
+
+    // d2. DEL-29 / N2: emit order.placed in the same tx as the order +
+    // line items. If the double-submit guard below rolls back, the event
+    // rolls back too — consumers never see a duplicate. The dispatcher
+    // publishes asynchronously. Event name renames to `order_intent.placed`
+    // when DEL-32 / X1 (Order Intent split) lands.
+    await appendEvent(tx, {
+      name: 'order.placed',
+      data: {
+        tenantId: cart.tenantId,
+        occurredAt: new Date().toISOString(),
+        actorType: 'tenant_end_user',
+        actorId: tenantEndUserId,
+        orderId: order.id,
+        cartId: cart.id,
+        locationId: cart.locationId,
+        fulfillmentType,
+        totalCents,
+        subtotalCents,
+        // Distinct brands across line items — for food-hall analytics.
+        brandIds: Array.from(new Set(lines.map((l) => l.brandId))),
+        lineItemCount: lines.length,
+      },
+    });
 
     // e. Double-submit guard: only flip carts where status is still
     // 'active'. If a parallel submit already converted the cart, the

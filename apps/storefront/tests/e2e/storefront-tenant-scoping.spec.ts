@@ -3,11 +3,13 @@ import { db } from '@rp/db';
 import {
   brands,
   storefronts,
+  tenantEndUserAccounts,
   tenantEndUserSessions,
   tenantEndUsers,
   tenants,
 } from '@rp/db/schema';
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { signInWithFakeGoogle } from './helpers/oauth-double';
 
 /**
  * DEL-3 integration tests — storefront tenant-scoped adapter.
@@ -233,21 +235,156 @@ test.describe
       expect(rows.length, 'no row may be written when brand context missing').toBe(0);
     });
 
-    // DEL-12: cross-tenant OAuth account isolation. Skipped until DEL-8 lands a
-    // multi-tenant seed + a Google OAuth test-double. The unit-level coverage
-    // for the adapter wrapper lives in packages/auth-core/src/storefront-adapter.test.ts
-    // (10 cases). The Path A staging+prd smoke verifies the BA-config layer
-    // end-to-end (signup → SELECT tenant_id). What this skipped E2E would add
-    // when DEL-8 unblocks it: a real Google OAuth round-trip at two tenants
-    // proving (provider_id, account_id, tenant_id) uniqueness at the HTTP layer.
-    test.skip('DEL-12 cross-tenant OAuth — same Google account at two tenants creates two rows', async () => {
-      // Pending DEL-8 multi-tenant seed + Google OAuth test-double.
-      // Expected behavior post-impl:
-      //   1. Sign in via Google at pizza-express → creates account A
-      //      with (provider_id='google', account_id='<google-uid>', tenant_id=hospitality_group)
-      //   2. Sign in via Google at burger-heaven-other-co (second tenant) with SAME Google account →
-      //      creates account B with same provider_id/account_id but tenant_id=other_co.
-      //      No 422/409. Two distinct rows in tenant_end_user_accounts.
-      //   3. Sessions are independent; user A and user B have no relationship.
+    // DEL-12: cross-tenant OAuth account isolation. Unskipped 2026-05-27
+    // (Phase 3 M2 / Step 5) via `BA_OAUTH_TEST_MODE=1` + BA hook
+    // overrides — see helpers/oauth-double.ts header for the design
+    // rationale and packages/auth-core/src/storefront-oauth-test-mode.ts
+    // for the BA-source verification.
+    //
+    // The same fake Google uid is presented to BA at two distinct tenants
+    // (Hospitality Group via pizza-express; Other Co via other-brand-del3-test
+    // — both fixtures already seeded by this spec's beforeAll). DEL-12's
+    // schema delta (`tenant_id` on `tenant_end_user_accounts` + tenant-
+    // scoped unique `(tenant_id, provider_id, account_id)`) is what
+    // permits two rows to coexist for the same `(provider_id, account_id)`
+    // pair when their `tenant_id` differs. Pre-DEL-12 this would have
+    // 422'd on the second signup; post-DEL-12 it must succeed.
+    test('DEL-12 cross-tenant OAuth — same Google account at two tenants creates two rows', async ({
+      request,
+    }) => {
+      // Skip cleanly if BA_OAUTH_TEST_MODE wasn't set on the dev server —
+      // the fake idToken would fail BA's default verifyIdToken (real
+      // Google JWT verification) with 401, and the failure mode would
+      // look like a regression in this test rather than missing config.
+      // CI sets the flag for the storefront e2e job; local dev needs
+      // `BA_OAUTH_TEST_MODE=1 doppler run --config dev -- pnpm dev` in
+      // apps/storefront to exercise this.
+      test.skip(
+        process.env.BA_OAUTH_TEST_MODE !== '1',
+        'DEL-12 OAuth e2e requires BA_OAUTH_TEST_MODE=1 on the dev server (CI only by default — see helpers/oauth-double.ts)',
+      );
+
+      const fakeUid = `google-uid-cross-tenant-${nonce()}`;
+      const email = `t+oauth-cross-${nonce()}@del12.local`;
+
+      // Signin #1 — pizza-express (Hospitality Group tenant).
+      const firstSignIn = await signInWithFakeGoogle(request, PIZZA_BRAND_SLUG, {
+        uid: fakeUid,
+        email,
+        name: 'OAuth Cross-Tenant Test',
+      });
+
+      const firstAccounts = await db
+        .select({
+          id: tenantEndUserAccounts.id,
+          providerId: tenantEndUserAccounts.providerId,
+          accountId: tenantEndUserAccounts.accountId,
+          tenantId: tenantEndUserAccounts.tenantId,
+          tenantEndUserId: tenantEndUserAccounts.tenantEndUserId,
+        })
+        .from(tenantEndUserAccounts)
+        .where(
+          and(
+            eq(tenantEndUserAccounts.providerId, 'google'),
+            eq(tenantEndUserAccounts.accountId, fakeUid),
+          ),
+        );
+
+      expect(
+        firstAccounts.length,
+        'first signin must create exactly one google account row',
+      ).toBe(1);
+      const [firstAccount] = firstAccounts;
+      if (!firstAccount) throw new Error('unreachable');
+      expect(firstAccount.tenantId).toBe(hospitalityTenantId);
+      expect(firstAccount.tenantEndUserId).toBe(firstSignIn.userId);
+
+      // Signin #2 — other-brand-del3-test (Other Co tenant). SAME fakeUid +
+      // SAME email — the DEL-12 invariant says this must succeed (tenant-
+      // scoped unique on accounts; tenant-scoped users — DEL-3).
+      const secondSignIn = await signInWithFakeGoogle(
+        request,
+        OTHER_BRAND_SLUG,
+        { uid: fakeUid, email, name: 'OAuth Cross-Tenant Test' },
+      );
+
+      // The second signin MUST create an independent user + account row
+      // — same email is allowed across tenants because end users are
+      // tenant-scoped per ADR-0003.
+      expect(
+        secondSignIn.userId,
+        'second signin must create a distinct user row (cross-tenant invariant)',
+      ).not.toBe(firstSignIn.userId);
+
+      const allAccounts = await db
+        .select({
+          id: tenantEndUserAccounts.id,
+          providerId: tenantEndUserAccounts.providerId,
+          accountId: tenantEndUserAccounts.accountId,
+          tenantId: tenantEndUserAccounts.tenantId,
+          tenantEndUserId: tenantEndUserAccounts.tenantEndUserId,
+        })
+        .from(tenantEndUserAccounts)
+        .where(
+          and(
+            eq(tenantEndUserAccounts.providerId, 'google'),
+            eq(tenantEndUserAccounts.accountId, fakeUid),
+          ),
+        );
+
+      expect(
+        allAccounts.length,
+        'after two signins: exactly two account rows with same (provider_id, account_id) but different tenant_id',
+      ).toBe(2);
+
+      const tenantIds = allAccounts.map((a) => a.tenantId).sort();
+      const expected = [hospitalityTenantId, otherTenantId].sort();
+      expect(tenantIds).toEqual(expected);
+
+      // Each account row points at the user row in its own tenant.
+      const userIdsByTenant = new Map(
+        allAccounts.map((a) => [a.tenantId, a.tenantEndUserId]),
+      );
+      expect(userIdsByTenant.get(hospitalityTenantId)).toBe(firstSignIn.userId);
+      expect(userIdsByTenant.get(otherTenantId)).toBe(secondSignIn.userId);
+
+      // Sessions are independent — confirm both signins have their own
+      // session rows (cookieCache writes a row at signin time per BA
+      // contract — `dist/api/routes/sign-in.mjs:121` `setSessionCookie`
+      // → `setSessionCookie` calls `internalAdapter.createSession`).
+      const sessions = await db
+        .select({
+          id: tenantEndUserSessions.id,
+          tenantEndUserId: tenantEndUserSessions.tenantEndUserId,
+          tenantId: tenantEndUserSessions.tenantId,
+        })
+        .from(tenantEndUserSessions)
+        .where(
+          inArray(tenantEndUserSessions.tenantEndUserId, [
+            firstSignIn.userId,
+            secondSignIn.userId,
+          ]),
+        );
+
+      expect(
+        sessions.length,
+        'each signin must produce its own session row',
+      ).toBeGreaterThanOrEqual(2);
+      // Hospitality Group user's session has Hospitality Group's tenant_id;
+      // Other Co user's session has Other Co's tenant_id. The post-DEL-26 +
+      // cookie-cache-tenant-version closure (session-model-scoped) guarantees
+      // the session row carries the tenant boundary.
+      const tenantIdsFromSessions = sessions.map((s) => s.tenantId).sort();
+      expect(new Set(tenantIdsFromSessions)).toEqual(
+        new Set([hospitalityTenantId, otherTenantId]),
+      );
+
+      // Cleanup: delete the two ephemeral users (cascades to accounts +
+      // sessions via FK ON DELETE CASCADE).
+      await db
+        .delete(tenantEndUsers)
+        .where(
+          inArray(tenantEndUsers.id, [firstSignIn.userId, secondSignIn.userId]),
+        );
     });
   });

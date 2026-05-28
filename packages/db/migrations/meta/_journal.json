@@ -64,6 +64,13 @@
       "when": 1779933560570,
       "tag": "0008_slimy_wrecking_crew",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1779974995018,
+      "tag": "0009_broad_stingray",
+      "breakpoints": true
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { extractStorefrontSlug } from '@/lib/tenant-resolution';
+import { extractHostFromUrl } from '@rp/auth-core/storefront-host';
 import { resolveStorefrontBySlug } from '@rp/auth-core/storefront-resolver';
 import { getSessionCookie } from 'better-auth/cookies';
 import { type NextRequest, NextResponse } from 'next/server';
@@ -11,14 +12,21 @@ import { type NextRequest, NextResponse } from 'next/server';
  *      the proxy is the sole writer of these. Stripping on every path
  *      (reserved subdomain, `/api`, no-host, unknown slug, resolved) is
  *      defense-in-depth against client-supplied spoofing.
- *   2. Short-circuit `/api`. BA resolves tenant via `host` directly
- *      (see apps/storefront/src/lib/storefront-tenant-context.ts), not via
- *      proxy headers. DEL-22 will revisit when BA goes brand-optional.
+ *   2. Short-circuit `/api`. BA resolves tenant via `host` (or, when this
+ *      proxy injects them, Referer/Origin) inside the BA route handler —
+ *      see `apps/storefront/src/lib/storefront-tenant-context.ts`. The
+ *      proxy intentionally does NOT inject on `/api/*` so we don't pay a
+ *      slug-resolution penalty on every BA call. Spec:
+ *      `docs/specs/cookie-cache-tenant-version.md` AC#4.
  *   3. Extract storefront slug from `Host`. Reserved subdomains short-circuit.
- *   4. Resolve slug → storefront context via DB. Unknown slug short-circuits.
- *   5. Inject authoritative `x-storefront-id`, `x-storefront-type`,
+ *   4. **Bare-host fallback** (cookie-cache-tenant-version AC#4): when
+ *      `Host` yields no slug, try `Referer` → `Origin` URL hosts. Covers
+ *      the Next.js 16 post-server-action-redirect render path where the
+ *      framework drops the storefront subdomain from `Host`.
+ *   5. Resolve slug → storefront context via DB. Unknown slug short-circuits.
+ *   6. Inject authoritative `x-storefront-id`, `x-storefront-type`,
  *      `x-storefront-name`. Inject `x-brand-slug` only when `type='brand'`.
- *   6. Public/protected path branching unchanged (DEL-17 cookie prefix preserved).
+ *   7. Public/protected path branching unchanged (DEL-17 cookie prefix preserved).
  */
 
 const PUBLIC_PATHS = [
@@ -42,6 +50,29 @@ const PROXY_OWNED_HEADERS = [
   'x-brand-slug',
 ] as const;
 
+/**
+ * Resolve the storefront slug from the request's hostable headers, in the
+ * same precedence order as the BA resolver (Host → Referer → Origin). The
+ * `x-storefront-id` source (which the resolver tries first) is the proxy's
+ * output, not its input — the proxy IS what populates it.
+ */
+function resolveSlugFromRequest(request: NextRequest): string | null {
+  const hostSlug = extractStorefrontSlug(request.headers.get('host'));
+  if (hostSlug) return hostSlug;
+
+  const refererSlug = extractStorefrontSlug(
+    extractHostFromUrl(request.headers.get('referer')),
+  );
+  if (refererSlug) return refererSlug;
+
+  const originSlug = extractStorefrontSlug(
+    extractHostFromUrl(request.headers.get('origin')),
+  );
+  if (originSlug) return originSlug;
+
+  return null;
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
@@ -52,8 +83,7 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  const host = request.headers.get('host');
-  const slug = extractStorefrontSlug(host);
+  const slug = resolveSlugFromRequest(request);
 
   if (!slug) {
     if (pathname === '/') {

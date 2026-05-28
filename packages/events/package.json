@@ -1,0 +1,30 @@
+{
+  "name": "@rp/events",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./types": "./src/types.ts",
+    "./writer": "./src/writer.ts",
+    "./inngest": "./src/inngest/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@rp/db": "workspace:*",
+    "@rp/emails": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "inngest": "^4.4.0",
+    "zod": "^4"
+  },
+  "devDependencies": {
+    "@rp/typescript-config": "workspace:*",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

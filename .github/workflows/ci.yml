@@ -73,6 +73,18 @@ jobs:
       E2E_ADMIN_PASSWORD: SuperSecretPassword123! # tests read this; must match seed
       SEED_TEST_FIXTURES: '1' # adds 2nd tenant for cross-tenant tests
       INNGEST_DEV: '1'
+      # Phase 3 M2 / Step 5 (DEL-12 OAuth e2e unskip): enables BA Google
+      # provider verifyIdToken + getUserInfo overrides in
+      # packages/auth-core/src/storefront.ts (gated check —
+      # storefront-oauth-test-mode.ts). CI job ONLY — never set in
+      # deploy-staging.yml or deploy-production.yml. Without this flag,
+      # the DEL-12 OAuth test calls test.skip() and emits a clear log
+      # message; with the flag, BA accepts fake idTokens with our
+      # recognisable prefix and the test exercises the full
+      # cross-tenant invariant via the idToken-direct branch
+      # (sign-in.mjs:76-128) — same handleOAuthUserInfo code path as
+      # the redirect flow.
+      BA_OAUTH_TEST_MODE: '1'
       # NODE_ENV intentionally NOT set to 'test' — Next dev under NODE_ENV=test
       # can hit odd runtime paths; GitHub Actions sets CI=1 automatically and
       # that's enough signal.

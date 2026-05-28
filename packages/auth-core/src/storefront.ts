@@ -24,6 +24,7 @@ import { type BetterAuthOptions, betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { emailOTP } from 'better-auth/plugins';
 import { type ResolveTenantContext, wrappedStorefrontAdapter } from './storefront-adapter';
+import { testModeGoogleHooks } from './storefront-oauth-test-mode';
 import { isAllowedStorefrontOrigin } from './storefront-origin';
 import { rewriteStorefrontEmailUrl } from './storefront-url';
 
@@ -47,6 +48,84 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       ),
 
     secret: process.env.BETTER_AUTH_SECRET,
+
+    // Dynamic baseURL — per-request resolution from the `Host` header.
+    //
+    // The storefront BA serves multiple tenant subdomains, but historically
+    // baseURL was frozen at init time from `BETTER_AUTH_URL` (= the platform
+    // host). That bit DEL-15 (reset-password URLs pointed at platform) — fixed
+    // there by a post-process URL rewriter in `sendResetPassword`. But the same
+    // root cause bit OAuth too: BA's `dist/api/routes/sign-in.mjs:133` builds
+    // the OAuth redirect URI as `${c.context.baseURL}/callback/${provider.id}`,
+    // and unlike reset-password URLs we can NOT post-process it — Google
+    // validates the `redirect_uri` query param against its OAuth-client
+    // allowed-list BEFORE letting the flow proceed. A frozen baseURL =
+    // `https://admin.deliverse.app` → Google sees
+    // `https://admin.deliverse.app/api/auth/callback/google` and rejects
+    // because the per-storefront Google client only allows the brand subdomain
+    // (`https://pizza-express.deliverse.app/...` etc. — see
+    // `docs/smoke-credentials.md § 7.1` for the full list).
+    //
+    // `DynamicBaseURLConfig` (BA 1.6.11
+    // `@better-auth/core/dist/types/init-options.d.mts`) makes baseURL
+    // request-scoped: BA derives the host from the `Host` header on every
+    // request, validates against `allowedHosts`, and constructs
+    // `${protocol}://${host}` per request. `protocol: 'auto'` lets BA infer
+    // from the request URL (which is `http://...` for dev `localhost` and
+    // `https://...` for stg/prd Vercel) — verified at
+    // `@better-auth@1.6.11/.../utils/url.mjs:getProtocolFromSource:155-170`.
+    //
+    // `allowedHosts` wildcards:
+    //   - `*.deliverse.app` — prd storefront subdomains. `admin.deliverse.app`
+    //     also matches the pattern but routes to the platform app via Vercel,
+    //     so the storefront BA never sees that Host. Wildcard is safe.
+    //   - `*.staging.deliverse.app` — stg same shape.
+    //   - `*.localhost:3001` — local dev. Port baked in (3001 is the
+    //     storefront dev port per playwright.config.ts + dev convention).
+    //
+    // No `fallback` set on purpose: a request arriving with a non-allowed
+    // host should fail loudly (`Host "..." is not in the allowed hosts list`)
+    // rather than silently falling back to a wrong base URL. Misrouting is
+    // a config/infra bug worth surfacing.
+    //
+    // **Side-effect — DEL-15 path narrows but stays correct.** With dynamic
+    // baseURL, BA-generated URLs in `sendResetPassword` already carry the
+    // storefront subdomain (no longer the platform host). The
+    // `rewriteStorefrontEmailUrl` helper still runs and substitutes the origin
+    // — when both origins already match, the swap is a no-op. Keeping the
+    // rewriter unchanged because (1) it's the canonical "URL origin = this
+    // brand subdomain" enforcement point and (2) removing it would couple
+    // DEL-15's correctness to BA's dynamic baseURL behavior, which is more
+    // brittle than the explicit post-process.
+    //
+    // **Why this didn't bite DEL-12 (Step 5 e2e).** The DEL-12 cross-tenant
+    // OAuth e2e uses BA's `/sign-in/social` idToken-direct branch, which
+    // never invokes the OAuth redirect flow (no `createAuthorizationURL`
+    // call, no `redirect_uri` query param, no Google `redirect_uri_mismatch`
+    // check). The redirect-flow bug lives on the path the test deliberately
+    // avoids — same diagnosis as the cookie-state hotfix in PR #85.
+    baseURL: {
+      allowedHosts: [
+        '*.deliverse.app',
+        '*.staging.deliverse.app',
+        '*.localhost:3001',
+        // Bare `localhost:3001` (no subdomain) — needed by Playwright's
+        // webServer probe in `apps/storefront/playwright.config.ts`. The
+        // probe hits `http://localhost:3001/api/auth/get-session` with no
+        // cookies to assert "server is up + BA initialised". BA returns
+        // 200 + JSON `null` (no session) IF baseURL resolves. Without
+        // this entry the wildcard requires a subdomain → BA throws
+        // BetterAuthError("Host ... not in allowed hosts") → probe times
+        // out → e2e job never starts. The proxy + tenant resolver still
+        // throw on bare-host for actual `/api/auth/*` traffic (e.g., the
+        // DEL-3 AC#5 negative test at
+        // `storefront-tenant-scoping.spec.ts:217` POSTs to bare
+        // localhost expecting 400 "no resolvable tenant") — the
+        // resolver gate is independent of BA's baseURL resolution.
+        'localhost:3001',
+      ],
+      protocol: 'auto',
+    },
 
     user: {
       fields: {
@@ -75,6 +154,34 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       fields: {
         userId: 'tenantEndUserId',
       },
+      // Phase 3 follow-up hotfix: BA defaults `storeStateStrategy` to
+      // 'database' when an adapter is configured
+      // (@better-auth/core/dist/context/create-context.mjs:133), which
+      // writes the OAuth PKCE state to `tenant_end_user_verifications` via
+      // `internalAdapter.createVerificationValue` with a random 32-char
+      // identifier (`@better-auth/dist/state.mjs:30-58`). The wrapped
+      // storefront adapter's `verification.create` calls
+      // `deriveVerificationType(identifier)` and throws
+      // `UNKNOWN_VERIFICATION_TYPE` because the random state doesn't match
+      // any known prefix (`sign-in-otp-` / `email-verification-otp-` /
+      // `forget-password-otp-` / `reset-password:`). Without this flip,
+      // every Google OAuth signin surfaces the error to the user
+      // verbatim — confirmed in prd at oomi-kitchen-test.deliverse.app the
+      // moment Step 4's `GOOGLE_CLIENT_ID`/`SECRET` went live.
+      //
+      // The cookie strategy stores the encrypted state in an
+      // `rp_store.oauth_state` cookie (10-min TTL, scoped to the exact
+      // storefront subdomain via `crossSubDomainCookies.enabled: false`).
+      // No verification row written → wrapper never sees the random
+      // identifier → handshake completes → `account.create` (which DOES
+      // route through the wrapper) stamps `tenantId` per DEL-12.
+      //
+      // The alternative — adding `'oauth_state'` to `verification_type`
+      // enum + extending `deriveVerificationType` to recognise the
+      // 32-char `[A-Za-z0-9_-]` shape — would require a schema migration
+      // for zero security benefit (state is ephemeral, lives 10 min, used
+      // once). Cookie strategy is the minimum-surface fix.
+      storeStateStrategy: 'cookie',
       additionalFields: {
         // DEL-12: BA's getAuthTables(options) only transforms fields it knows
         // about. Without this registration, the adapter wrapper's injected
@@ -114,29 +221,40 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       },
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24 * 7,
-      // NOTE (session-model-scoped, post-DEL-26): cookieCache stays enabled.
-      // BA's `dist/api/routes/session.mjs` short-circuits `get-session` by
-      // decrypting the session payload from a signed `session_data` cookie
-      // (5min TTL) WITHOUT calling the adapter — so the SCOPED_MODELS
-      // extension for session and its tenant predicate do not apply on
-      // cookieCache hits. A cross-tenant cookie replay during the cache
-      // window still returns the source-tenant payload. Disabling
-      // cookieCache forces a DB lookup that goes through the wrapper, but
-      // it also breaks the post-server-action-redirect render path used by
-      // the order detail page (Next.js 16 drops the storefront subdomain
-      // from the `Host` header for that specific render — the page comment
-      // at `apps/storefront/src/app/(shop)/orders/[orderId]/page.tsx`
-      // documents this quirk). Trade-off accepted: keep the perf
-      // optimisation + the workaround, accept the bounded cross-tenant
-      // exposure window. The schema migration + write-layer stamping in
-      // this fix still positions us for a proper closure once a follow-up
-      // addresses the cookieCache cross-tenant path (e.g., via the BA
-      // `cookieCache.version` callback returning the current tenant ID, or
-      // a Next.js fix for the redirect-render Host drop). See
-      // docs/specs/session-model-scoped.md § "Open Questions".
+      // cookie-cache-tenant-version: the `version` callback closes the
+      // cross-tenant cookie-replay gap that session-model-scoped (PR #76)
+      // left open. BA invokes this callback at both cache-write time
+      // (post-signup/signin, via `dist/cookies/index.mjs:69-86`) and
+      // cache-read time (every `get-session` cookieCache hit, via
+      // `dist/api/routes/session.mjs:93-104`). At write time it runs in
+      // the writer-tenant's request context → returns writer's tenantId,
+      // stamped into the cached payload's `version` field. At read time
+      // it runs in the reader-tenant's request context → returns reader's
+      // tenantId. Mismatch on cross-tenant replay → BA expires the
+      // session_data cookie → falls through to the adapter's findSession
+      // → wrapped adapter's tenant predicate excludes the cross-tenant
+      // session → BA returns null user.
+      //
+      // The closure-captured `resolveTenantContext` is the same one the
+      // wrapped adapter uses (single source of truth for request →
+      // tenant). Cross-package boundary: `packages/auth-core` does NOT
+      // import app code — the resolver body lives in the app
+      // (`apps/storefront/src/lib/storefront-tenant-context.ts`) and is
+      // passed in via `createStorefrontAuth(resolveTenantContext)`.
+      //
+      // The bare-host page-render path (Next.js 16 drops storefront
+      // subdomain from Host on post-server-action-redirect renders) is
+      // handled by the resolver's Referer/Origin fallback + the proxy's
+      // matching `x-storefront-id` injection, so the callback never
+      // throws on a real RSC render. See
+      // docs/specs/cookie-cache-tenant-version.md AC#3 + AC#4.
       cookieCache: {
         enabled: true,
         maxAge: 60 * 5,
+        version: async () => {
+          const ctx = await resolveTenantContext();
+          return ctx.tenantId;
+        },
       },
     },
 
@@ -232,6 +350,16 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID || '',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+        // Test-mode hook overrides for DEL-12 OAuth e2e. CI sets
+        // BA_OAUTH_TEST_MODE=1 for the storefront e2e job ONLY — dev / stg /
+        // prd NEVER set this flag, so the spread below is a no-op there
+        // and BA's default Google `verifyIdToken` (real JWT verification
+        // against Google's JWKS) + default `getUserInfo` apply. See
+        // packages/auth-core/src/storefront-oauth-test-mode.ts header for
+        // the design rationale + the BA-source verification of the hook
+        // signatures + the (deliberately limited) defense-in-depth
+        // posture if the env var ever leaks.
+        ...(process.env.BA_OAUTH_TEST_MODE === '1' ? testModeGoogleHooks : {}),
       },
     },
 
