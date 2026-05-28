@@ -8,7 +8,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { extractStorefrontSlug } from './storefront-host';
+import { extractHostFromUrl, extractStorefrontSlug } from './storefront-host';
 
 describe('extractStorefrontSlug', () => {
   describe('extraction', () => {
@@ -85,5 +85,52 @@ describe('extractStorefrontSlug', () => {
     it('returns null for undefined baseDomain', () => {
       expect(extractStorefrontSlug('pizza-express.deliverse.app', undefined)).toBeNull();
     });
+  });
+});
+
+describe('extractHostFromUrl', () => {
+  it('returns host from prd https URL', () => {
+    expect(extractHostFromUrl('https://oomi-kitchen.deliverse.app/checkout')).toBe(
+      'oomi-kitchen.deliverse.app',
+    );
+  });
+
+  it('returns host:port from dev http URL', () => {
+    expect(extractHostFromUrl('http://pizza-express.localhost:3001/')).toBe(
+      'pizza-express.localhost:3001',
+    );
+  });
+
+  it('returns host without trailing slash even for root path', () => {
+    expect(extractHostFromUrl('https://deliverse.app/')).toBe('deliverse.app');
+  });
+
+  it('returns host stripped of query + hash', () => {
+    expect(
+      extractHostFromUrl('https://pizza-express.deliverse.app/cart?ref=a#x'),
+    ).toBe('pizza-express.deliverse.app');
+  });
+
+  it('returns null for non-URL input', () => {
+    expect(extractHostFromUrl('not a url')).toBeNull();
+  });
+
+  it('returns null for relative URL', () => {
+    // `new URL('/foo')` throws — relative URLs aren't absolute. Browsers
+    // send absolute Referer/Origin values (or no header at all), so this
+    // is the right behavior for the resolver/proxy fallback.
+    expect(extractHostFromUrl('/cart')).toBeNull();
+  });
+
+  it('returns null for null input', () => {
+    expect(extractHostFromUrl(null)).toBeNull();
+  });
+
+  it('returns null for undefined input', () => {
+    expect(extractHostFromUrl(undefined)).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(extractHostFromUrl('')).toBeNull();
   });
 });

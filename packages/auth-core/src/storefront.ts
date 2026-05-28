@@ -114,29 +114,40 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       },
       expiresIn: 60 * 60 * 24 * 30,
       updateAge: 60 * 60 * 24 * 7,
-      // NOTE (session-model-scoped, post-DEL-26): cookieCache stays enabled.
-      // BA's `dist/api/routes/session.mjs` short-circuits `get-session` by
-      // decrypting the session payload from a signed `session_data` cookie
-      // (5min TTL) WITHOUT calling the adapter — so the SCOPED_MODELS
-      // extension for session and its tenant predicate do not apply on
-      // cookieCache hits. A cross-tenant cookie replay during the cache
-      // window still returns the source-tenant payload. Disabling
-      // cookieCache forces a DB lookup that goes through the wrapper, but
-      // it also breaks the post-server-action-redirect render path used by
-      // the order detail page (Next.js 16 drops the storefront subdomain
-      // from the `Host` header for that specific render — the page comment
-      // at `apps/storefront/src/app/(shop)/orders/[orderId]/page.tsx`
-      // documents this quirk). Trade-off accepted: keep the perf
-      // optimisation + the workaround, accept the bounded cross-tenant
-      // exposure window. The schema migration + write-layer stamping in
-      // this fix still positions us for a proper closure once a follow-up
-      // addresses the cookieCache cross-tenant path (e.g., via the BA
-      // `cookieCache.version` callback returning the current tenant ID, or
-      // a Next.js fix for the redirect-render Host drop). See
-      // docs/specs/session-model-scoped.md § "Open Questions".
+      // cookie-cache-tenant-version: the `version` callback closes the
+      // cross-tenant cookie-replay gap that session-model-scoped (PR #76)
+      // left open. BA invokes this callback at both cache-write time
+      // (post-signup/signin, via `dist/cookies/index.mjs:69-86`) and
+      // cache-read time (every `get-session` cookieCache hit, via
+      // `dist/api/routes/session.mjs:93-104`). At write time it runs in
+      // the writer-tenant's request context → returns writer's tenantId,
+      // stamped into the cached payload's `version` field. At read time
+      // it runs in the reader-tenant's request context → returns reader's
+      // tenantId. Mismatch on cross-tenant replay → BA expires the
+      // session_data cookie → falls through to the adapter's findSession
+      // → wrapped adapter's tenant predicate excludes the cross-tenant
+      // session → BA returns null user.
+      //
+      // The closure-captured `resolveTenantContext` is the same one the
+      // wrapped adapter uses (single source of truth for request →
+      // tenant). Cross-package boundary: `packages/auth-core` does NOT
+      // import app code — the resolver body lives in the app
+      // (`apps/storefront/src/lib/storefront-tenant-context.ts`) and is
+      // passed in via `createStorefrontAuth(resolveTenantContext)`.
+      //
+      // The bare-host page-render path (Next.js 16 drops storefront
+      // subdomain from Host on post-server-action-redirect renders) is
+      // handled by the resolver's Referer/Origin fallback + the proxy's
+      // matching `x-storefront-id` injection, so the callback never
+      // throws on a real RSC render. See
+      // docs/specs/cookie-cache-tenant-version.md AC#3 + AC#4.
       cookieCache: {
         enabled: true,
         maxAge: 60 * 5,
+        version: async () => {
+          const ctx = await resolveTenantContext();
+          return ctx.tenantId;
+        },
       },
     },
 
