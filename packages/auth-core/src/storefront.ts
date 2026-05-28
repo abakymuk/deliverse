@@ -49,6 +49,70 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
 
     secret: process.env.BETTER_AUTH_SECRET,
 
+    // Dynamic baseURL — per-request resolution from the `Host` header.
+    //
+    // The storefront BA serves multiple tenant subdomains, but historically
+    // baseURL was frozen at init time from `BETTER_AUTH_URL` (= the platform
+    // host). That bit DEL-15 (reset-password URLs pointed at platform) — fixed
+    // there by a post-process URL rewriter in `sendResetPassword`. But the same
+    // root cause bit OAuth too: BA's `dist/api/routes/sign-in.mjs:133` builds
+    // the OAuth redirect URI as `${c.context.baseURL}/callback/${provider.id}`,
+    // and unlike reset-password URLs we can NOT post-process it — Google
+    // validates the `redirect_uri` query param against its OAuth-client
+    // allowed-list BEFORE letting the flow proceed. A frozen baseURL =
+    // `https://admin.deliverse.app` → Google sees
+    // `https://admin.deliverse.app/api/auth/callback/google` and rejects
+    // because the per-storefront Google client only allows the brand subdomain
+    // (`https://pizza-express.deliverse.app/...` etc. — see
+    // `docs/smoke-credentials.md § 7.1` for the full list).
+    //
+    // `DynamicBaseURLConfig` (BA 1.6.11
+    // `@better-auth/core/dist/types/init-options.d.mts`) makes baseURL
+    // request-scoped: BA derives the host from the `Host` header on every
+    // request, validates against `allowedHosts`, and constructs
+    // `${protocol}://${host}` per request. `protocol: 'auto'` lets BA infer
+    // from the request URL (which is `http://...` for dev `localhost` and
+    // `https://...` for stg/prd Vercel) — verified at
+    // `@better-auth@1.6.11/.../utils/url.mjs:getProtocolFromSource:155-170`.
+    //
+    // `allowedHosts` wildcards:
+    //   - `*.deliverse.app` — prd storefront subdomains. `admin.deliverse.app`
+    //     also matches the pattern but routes to the platform app via Vercel,
+    //     so the storefront BA never sees that Host. Wildcard is safe.
+    //   - `*.staging.deliverse.app` — stg same shape.
+    //   - `*.localhost:3001` — local dev. Port baked in (3001 is the
+    //     storefront dev port per playwright.config.ts + dev convention).
+    //
+    // No `fallback` set on purpose: a request arriving with a non-allowed
+    // host should fail loudly (`Host "..." is not in the allowed hosts list`)
+    // rather than silently falling back to a wrong base URL. Misrouting is
+    // a config/infra bug worth surfacing.
+    //
+    // **Side-effect — DEL-15 path narrows but stays correct.** With dynamic
+    // baseURL, BA-generated URLs in `sendResetPassword` already carry the
+    // storefront subdomain (no longer the platform host). The
+    // `rewriteStorefrontEmailUrl` helper still runs and substitutes the origin
+    // — when both origins already match, the swap is a no-op. Keeping the
+    // rewriter unchanged because (1) it's the canonical "URL origin = this
+    // brand subdomain" enforcement point and (2) removing it would couple
+    // DEL-15's correctness to BA's dynamic baseURL behavior, which is more
+    // brittle than the explicit post-process.
+    //
+    // **Why this didn't bite DEL-12 (Step 5 e2e).** The DEL-12 cross-tenant
+    // OAuth e2e uses BA's `/sign-in/social` idToken-direct branch, which
+    // never invokes the OAuth redirect flow (no `createAuthorizationURL`
+    // call, no `redirect_uri` query param, no Google `redirect_uri_mismatch`
+    // check). The redirect-flow bug lives on the path the test deliberately
+    // avoids — same diagnosis as the cookie-state hotfix in PR #85.
+    baseURL: {
+      allowedHosts: [
+        '*.deliverse.app',
+        '*.staging.deliverse.app',
+        '*.localhost:3001',
+      ],
+      protocol: 'auto',
+    },
+
     user: {
       fields: {
         emailVerified: 'emailVerified',
