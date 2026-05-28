@@ -135,11 +135,11 @@ End user identity scoped to tenant. Brand provides UX context only (theme, subdo
 
 > **Linear is the source of truth for what we're working on.** This section mirrors the active project + milestone in Linear at a glance; the canonical state is in Linear. See `docs/linear-workflow.md` for the rules.
 
-Active project: **Phase 2 — Food Hall Architecture Alignment** (Linear, Urgent).
-Active milestone: **M1 — Storefront concept + brand-optional auth**.
-Active issue (Todo): **DEL-19 — Introduce first-class `storefronts` table** (additive schema, lowest-risk first step per [ADR-0012](docs/decisions/0012-storefront-brand-tenant-food-hall-architecture.md)).
+Active project: **none — Phase 2 closed 2026-05-28.** Next project TBD.
 
-Phase 2 plan: [`docs/planning/food-hall-architecture-linear-plan.md`](docs/planning/food-hall-architecture-linear-plan.md) — generalizes the storefront/brand/tenant model to support three modes (single-brand, multi-brand-separate, food hall) with brand on cart/order line items, not on cart/order ownership. M2 = commerce schema (can land parallel to M1's auth work); M3 = food-hall storefront shell live in prd.
+Phase 2 plan (closed): [`docs/planning/food-hall-architecture-linear-plan.md`](docs/planning/food-hall-architecture-linear-plan.md) — generalized the storefront/brand/tenant model to support three modes (single-brand, multi-brand-separate, food hall) with brand on cart/order line items, not on cart/order ownership. All three modes live in prd.
+
+**Phase 2 — Food Hall Architecture Alignment: closed 2026-05-28.** All 10 issues delivered in prd across M1 (storefront concept + brand-optional auth), M2 (commerce schema), and M3 (food-hall storefront shell). Shipped: DEL-18 (ADR-0012), DEL-19 (first-class `storefronts` table), DEL-20 (storefront-aware host resolution), DEL-21 (`session.current_brand_id` nullable), DEL-22 (brand-optional Better-Auth resolver + adapter), DEL-23 (verification `brand_id` brand-optional stamping), DEL-24 (commerce schema — carts/orders tenant-scoped, brand on line items), DEL-25 (food-hall storefront shell — OOMI Kitchen live in prd as the mode-3 demo tenant), DEL-26 (cross-mode test matrix + Mode-1 + cookie-isolation e2e), DEL-27 (post-impl doc cleanup). Storefront ≠ brand is now a first-class architectural concept.
 
 **Phase 1 — Auth Vertical: closed 2026-05-27.** All 10 acceptance criteria from `docs/auth-spec.md` §6 met in prd. Shipped: DEL-3 (tenant-scoped adapter), DEL-4 (email delivery architecture), DEL-5 (storefront OTP email), DEL-6 (password reset + email verification emails), DEL-7 (auth UI vertical — signup + cross-brand disclosure), DEL-8 (E2E in CI), DEL-9 (OTP rate limiting — 60s window + 15min cooldown via `tenant_otp_lockouts`), DEL-12 (storefront `tenant_end_user_accounts` tenant scoping → OAuth unblocked), DEL-13 (invitation email wiring), DEL-14 (cross-brand "Welcome back!" on /verify-otp), DEL-15 (storefront BA per-brand baseURL), DEL-16 (SEED_ADMIN_PASSWORD smoke infra), DEL-17 (CI Playwright login-redirect fix).
 
@@ -248,7 +248,7 @@ See `docs/decisions/` for full ADRs. Highlights:
 - **0004:** Two Next.js apps (not one app with routes)
 - **0005:** Doppler + Vercel (not Vercel env vars alone)
 - **0006:** Neon Postgres (not Supabase, not RDS)
-- **0012:** Storefront, Brand, Tenant, and Food Hall Architecture (target model for single-brand, multi-brand, and food-hall modes)
+- **0012:** Storefront, Brand, Tenant, and Food Hall Architecture (model for single-brand, multi-brand-separate, and food-hall modes — all three live in prd)
 
 ---
 

@@ -21,7 +21,7 @@ Make the storefront Better-Auth instance (`packages/auth-core/src/storefront.ts`
 
 After DEL-3 ships, the storefront BA instance is no longer "documented as unsafe to expose" ([`schema-v1-ba-compat.md` §4](./schema-v1-ba-compat.md#4-constraints-carried-forward)), with one explicit carve-out: OAuth account lookup. See §10.
 
-> **Evolution note.** The wrapper's brand-required behavior described in this spec is the M1 state. The **target architecture** ([ADR-0012](../decisions/0012-storefront-brand-tenant-food-hall-architecture.md)) makes brand context optional so tenant-level food-hall storefronts can run. Tenant scoping remains mandatory in all modes. Implementation work is tracked in [`docs/planning/food-hall-architecture-linear-plan.md`](../planning/food-hall-architecture-linear-plan.md).
+> **Evolution note.** This spec describes the brand-required M1 contract that DEL-3 shipped. Brand context is now **optional** per [ADR-0012](../decisions/0012-storefront-brand-tenant-food-hall-architecture.md) — DEL-22 widened the resolver + wrapped adapter to support tenant-host food-hall storefronts (`current_brand_id` NULL on sessions, `brand_id` NULL on verification rows when no brand resolves). Tenant scoping remains mandatory in all modes. The brand-optional contract is captured in [`docs/specs/ba-brand-optional.md`](./ba-brand-optional.md); the cumulative wrapped-adapter behavior is summarized in [ADR-0010](../decisions/0010-tenant-scoping-injection.md) § Amendments.
 
 ## 2. Source of truth
 

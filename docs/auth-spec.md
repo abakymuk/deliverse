@@ -70,14 +70,14 @@ packages/
 
 **Why two apps:** security boundary = network boundary. Cookies on `admin.*` cannot leak to `*.deliverse.app` storefronts by design. Cannot be undone by a bug in an `if` statement.
 
-**Storefront mode is brand-required today** ([ADR-0010](./decisions/0010-tenant-scoping-injection.md)); [ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md) defines the **target brand-optional model** that adds tenant-level food-hall storefronts as a first-class concept. The acceptance criteria in §6 and the data model in §8 describe current-state behavior; the target-state shape is captured in ADR-0012.
+**Storefront mode is brand-optional** per [ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md). Brand-host storefronts (`{brand-slug}.deliverse.app`) and tenant-host food-hall storefronts (`{tenant-slug}.deliverse.app`) both work; tenant scoping remains mandatory in all modes. The original brand-required adapter contract from [ADR-0010](./decisions/0010-tenant-scoping-injection.md) was relaxed by DEL-22 — see ADR-0010's amendments for the brand-optional behavior, and ADR-0012 §"Supported modes" for the three modes (single-brand, multi-brand separate, food hall).
 
 ## 6. Acceptance Criteria
 
 1. End user `john@x.com` can have separate accounts at tenant A and tenant B. Sessions and logins on one do not affect the other.
 2. End user `john@x.com` has ONE account at tenant A, usable across all brands of tenant A. Logging in at `pizza-express.deliverse.app` and `burger-heaven.deliverse.app` (same tenant) resolves to same `tenant_end_user_id`.
 3. Platform staff login at `admin.deliverse.app` via email/password or Google. Session: 7d inactivity / 30d absolute max.
-4. End user login at `{brand}.deliverse.app` via email OTP (6-digit, 10min TTL) or Google. Session: 30d inactivity.
+4. End user login at any storefront — `{brand-slug}.deliverse.app` (brand-host) or `{tenant-slug}.deliverse.app` (tenant-host food hall) — via email OTP (6-digit, 10min TTL), password, or Google. Session: 30d inactivity. Brand-host sessions stamp `current_brand_id` with the brand UUID; tenant-host sessions stamp `current_brand_id=NULL` per [ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md).
 5. End user navigating to `admin.deliverse.app` sees generic 404, never an authorized/unauthorized leak.
 6. Tenant staff querying brand they don't have membership for → 404, never 403.
 7. Tenant soft-delete: 30-day grace → hard-delete cascades to locations, brands, tenant_end_users.
