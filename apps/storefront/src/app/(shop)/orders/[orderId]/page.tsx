@@ -1,0 +1,82 @@
+import { db } from '@rp/db';
+import { orders } from '@rp/db/schema';
+import { eq } from 'drizzle-orm';
+import { headers } from 'next/headers';
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { auth } from '@/lib/auth';
+import { OrderSummary } from '@/components/orders/order-summary';
+
+type Params = { orderId: string };
+
+/**
+ * Order detail page — `/orders/<orderId>`.
+ *
+ * RSC. Resolves session, loads the order by id, then verifies:
+ *
+ *   - `order.tenantEndUserId === session.user.id` (cross-user guard)
+ *
+ * If the check fails, `notFound()` — never surface another user's order
+ * even when the URL is correct. Loading by ID alone (no ownership
+ * check) would let an attacker enumerate other users' orders simply by
+ * guessing UUIDs.
+ *
+ * **Why no cross-tenant guard here**: `tenant_end_users` are
+ * tenant-scoped per [ADR-0003](../../../decisions/0003-tenant-scoped-end-users.md),
+ * and Better-Auth sessions are bound to a single tenant via the
+ * wrapped Drizzle adapter (DEL-3). A session at tenant A can never
+ * authenticate against a user row at tenant B because `tenantEndUsers`
+ * are isolated per tenant. So `order.tenantEndUserId === session.user.id`
+ * implicitly enforces tenant scoping — the session.user.id only matches
+ * orders that belong to the session's tenant. No separate storefront-
+ * context check is needed (and avoiding it makes the page robust to
+ * Next.js's server-action redirect handling, which can drop the
+ * subdomain from the Host header for the post-redirect page render).
+ *
+ * Note: `orders.tenant_end_user_id` is NULLABLE per DEL-24 (ON DELETE
+ * SET NULL — GDPR right-to-be-forgotten preserves the order without
+ * the user link). A NULL value never matches a session userId, so
+ * anonymized orders are inaccessible by definition.
+ *
+ * DEL-25 PR 25c / docs/specs/food-hall-storefront.md.
+ */
+export default async function OrderDetailPage({
+  params,
+}: {
+  params: Promise<Params>;
+}) {
+  const { orderId } = await params;
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session?.user) {
+    // Proxy gates /orders via PROTECTED_PATHS, but defense-in-depth.
+    notFound();
+  }
+
+  const [order] = await db
+    .select()
+    .from(orders)
+    .where(eq(orders.id, orderId))
+    .limit(1);
+  if (!order) notFound();
+  if (order.tenantEndUserId !== session.user.id) notFound();
+
+  return (
+    <div className="container mx-auto p-8">
+      <div className="mb-6">
+        <Link
+          href="/"
+          className="text-sm text-[var(--color-muted-foreground)] hover:underline"
+        >
+          ← Back to the menu
+        </Link>
+      </div>
+      <h1 className="text-4xl font-bold">Order placed</h1>
+      <p className="mt-2 text-[var(--color-muted-foreground)]">
+        Order #{order.id.slice(0, 8)}
+      </p>
+      <div className="mt-8">
+        <OrderSummary order={order} />
+      </div>
+    </div>
+  );
+}
