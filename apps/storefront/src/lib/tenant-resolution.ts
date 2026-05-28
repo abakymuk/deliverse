@@ -1,19 +1,19 @@
 /**
- * Tenant resolution: subdomain → brand → tenant (app-side helpers).
+ * Tenant resolution: subdomain → storefront → brand/tenant (app-side helpers).
  *
- * The pure `extractBrandSlug` logic lives in `@rp/auth-core/storefront-host`
+ * The pure `extractStorefrontSlug` logic lives in `@rp/auth-core/storefront-host`
  * (so the BA adapter wrapper can use it without an apps→packages dep).
  * This module:
- *   - wraps `extractBrandSlug` to read `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN`
+ *   - wraps `extractStorefrontSlug` to read `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN`
  *     from env (preserving the existing proxy + server-component API),
  *   - exports the React-`cache()`-memoized `getBrandContext(slug)` for
- *     server components that read the proxy-injected `x-brand-slug` header.
+ *     server components that read the proxy-injected `x-brand-slug` header,
+ *   - exports the React-`cache()`-memoized `getStorefrontContext()` that
+ *     wraps `resolveStorefrontTenantContext()` with a `null`-on-failure
+ *     contract for RSC pages.
  */
 
-import {
-  extractBrandSlug as extractBrandSlugFromHost,
-  extractStorefrontSlug as extractStorefrontSlugFromHost,
-} from '@rp/auth-core/storefront-host';
+import { extractStorefrontSlug as extractStorefrontSlugFromHost } from '@rp/auth-core/storefront-host';
 import type { StorefrontTenantContext } from '@rp/auth-core/storefront-adapter';
 import { resolveBrandBySlug } from '@rp/auth-core/storefront-tenant-resolver';
 import type { BrandContext } from '@rp/auth-core/storefront-tenant-resolver';
@@ -23,31 +23,12 @@ import { resolveStorefrontTenantContext } from './storefront-tenant-context';
 export type { BrandContext, StorefrontTenantContext };
 
 /**
- * Extract the brand slug from a Host header value, using
- * `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` as the base.
- *
- * Throws if the env var is not set — that's a config error, not a request error.
- *
- * @deprecated DEL-22 — prefer {@link extractStorefrontSlug}. The BA tenant
- * resolver still consumes this; both wrappers coexist until brand-optional BA.
- */
-export function extractBrandSlug(host: string | null): string | null {
-  const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
-  if (!baseDomain) {
-    throw new Error('NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN not set');
-  }
-  return extractBrandSlugFromHost(host, baseDomain);
-}
-
-/**
  * Extract the storefront slug from a Host header value, using
  * `NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN` as the base.
  *
  * Throws if the env var is not set — that's a config error, not a request error.
  *
- * Used by the storefront proxy (DEL-20) as the routing entry point. Same value
- * as `extractBrandSlug` today; the brand-vs-tenant discriminator comes from
- * `resolveStorefrontBySlug`.
+ * Used by the storefront proxy (DEL-20) as the routing entry point.
  */
 export function extractStorefrontSlug(host: string | null): string | null {
   const baseDomain = process.env.NEXT_PUBLIC_STOREFRONT_BASE_DOMAIN;
