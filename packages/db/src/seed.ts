@@ -28,6 +28,8 @@
  *
  * Test fixtures (gated on SEED_TEST_FIXTURES=1):
  *   - 1 secondary tenant (other-co-test) with brand + storefront (DEL-8)
+ *   - 1 single-brand tenant (solo-cafe-test) — Mode-1 coverage fixture
+ *     with brand + location + storefront + menu + 1 item (DEL-26)
  *   - 1 test end-user (cart-test@deliverse.test) under hospitality-group (DEL-24)
  *   - 1 multi-brand cart with 2 cart_items (mixed brand_id) for that user (DEL-24)
  *
@@ -120,6 +122,22 @@ const OOMI_PIZZA_ITEM_TRUFFLE_ID = '00000000-0000-4000-8000-000000000073';
 // subsections are visibly different from the food-hall shell defaults.
 const OOMI_BURGER_PRIMARY_HEX = '#dc2626'; // warm red — burger
 const OOMI_PIZZA_PRIMARY_HEX = '#16a34a'; // green — pizza
+
+// DEL-26: solo-cafe-test — single-brand tenant fixture for Mode-1 coverage
+// (SEED_TEST_FIXTURES-gated, not canonical). Used by
+// apps/storefront/tests/e2e/mode-1-single-brand.spec.ts; documented in
+// docs/specs/food-hall-test-matrix.md. Slug doubles as tenant + brand +
+// storefront slug — the degenerate single-brand shape per ADR-0012
+// (storefront == brand == tenant entry point when there's only one brand).
+// UUID range 80–93 leaves headroom past 0–73 (hospitality-group + OOMI +
+// DEL-24 cart fixture).
+const SOLO_TENANT_SLUG = 'solo-cafe-test';
+const SOLO_TENANT_NAME = 'Solo Cafe Test';
+const SOLO_BRAND_SLUG = 'solo-cafe-test';
+const SOLO_BRAND_NAME = 'Solo Cafe';
+const SOLO_LOCATION_ID = '00000000-0000-4000-8000-000000000080';
+const SOLO_MENU_ID = '00000000-0000-4000-8000-000000000081';
+const SOLO_ITEM_ESPRESSO_ID = '00000000-0000-4000-8000-000000000082';
 
 async function seed() {
   const password = process.env.SEED_ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD;
@@ -650,6 +668,121 @@ async function seed() {
       console.info(
         `Seeded test fixtures: tenant=other-co-test (${otherTenant.id}), brand=other-brand-test, storefront=other-brand-test`,
       );
+    }
+
+    // === DEL-26: solo-cafe-test — single-brand tenant fixture (Mode-1) ===
+    // Test-only (SEED_TEST_FIXTURES-gated). Provides the canonical Mode-1
+    // (single-brand tenant) shape per ADR-0012 §"Supported modes" — one
+    // tenant, one brand, one storefront, one location, one menu, one item.
+    // Read-only in the test: `mode-1-single-brand.spec.ts` resolves these
+    // rows in `beforeAll` and exercises the routing + adapter + disclosure
+    // invariants. Idempotency via partial-unique constraints + deterministic
+    // UUIDs (matches other-co-test + OOMI patterns).
+    await db
+      .insert(tenants)
+      .values({
+        slug: SOLO_TENANT_SLUG,
+        name: SOLO_TENANT_NAME,
+        status: 'active',
+      })
+      .onConflictDoNothing();
+
+    const [soloTenant] = await db
+      .select({ id: tenants.id })
+      .from(tenants)
+      .where(and(eq(tenants.slug, SOLO_TENANT_SLUG), isNull(tenants.deletedAt)))
+      .limit(1);
+
+    if (soloTenant) {
+      // Single brand — the degenerate Mode-1 shape: storefront ≡ brand ≡
+      // tenant entry point.
+      await db
+        .insert(brands)
+        .values({
+          tenantId: soloTenant.id,
+          slug: SOLO_BRAND_SLUG,
+          name: SOLO_BRAND_NAME,
+          isActive: true,
+          brandingJson: {},
+        })
+        .onConflictDoNothing();
+
+      const [soloBrand] = await db
+        .select({ id: brands.id })
+        .from(brands)
+        .where(
+          and(
+            eq(brands.tenantId, soloTenant.id),
+            eq(brands.slug, SOLO_BRAND_SLUG),
+            isNull(brands.deletedAt),
+          ),
+        )
+        .limit(1);
+
+      if (soloBrand) {
+        await db
+          .insert(locations)
+          .values({
+            id: SOLO_LOCATION_ID,
+            tenantId: soloTenant.id,
+            name: 'Solo Cafe Kitchen',
+            addressLine1: '1 Solo Street',
+            city: 'Brooklyn',
+            state: 'NY',
+            postalCode: '11201',
+            country: 'US',
+          })
+          .onConflictDoNothing({ target: locations.id });
+
+        await db
+          .insert(locationBrands)
+          .values({ locationId: SOLO_LOCATION_ID, brandId: soloBrand.id })
+          .onConflictDoNothing({
+            target: [locationBrands.locationId, locationBrands.brandId],
+          });
+
+        // One brand storefront. slug == tenant slug == brand slug because
+        // there's only one brand to surface.
+        await db
+          .insert(storefronts)
+          .values({
+            tenantId: soloTenant.id,
+            slug: SOLO_TENANT_SLUG,
+            name: SOLO_BRAND_NAME,
+            type: 'brand',
+            primaryBrandId: soloBrand.id,
+            brandingJson: {},
+            isActive: true,
+          })
+          .onConflictDoNothing();
+
+        await db
+          .insert(menus)
+          .values({
+            id: SOLO_MENU_ID,
+            brandId: soloBrand.id,
+            name: 'Solo Cafe Menu',
+            description: 'Espresso and pastries.',
+            isActive: true,
+          })
+          .onConflictDoNothing({ target: menus.id });
+
+        await db
+          .insert(menuItems)
+          .values({
+            id: SOLO_ITEM_ESPRESSO_ID,
+            menuId: SOLO_MENU_ID,
+            name: 'House Espresso',
+            description: 'Single origin, double shot.',
+            priceCents: 450,
+            isActive: true,
+          })
+          .onConflictDoNothing({ target: menuItems.id });
+
+        console.info(
+          `Seeded DEL-26 fixture: tenant=${SOLO_TENANT_SLUG} (${soloTenant.id}), brand=${SOLO_BRAND_SLUG}, location=Solo Cafe Kitchen, storefront=${SOLO_TENANT_SLUG}(brand), menu=Solo Cafe Menu, menu_items=1`,
+        );
+      }
     }
 
     // === DEL-24: multi-brand cart fixture under hospitality-group ===
