@@ -15,6 +15,7 @@
     "@hookform/resolvers": "^5.4.0",
     "@rp/auth-core": "workspace:*",
     "@rp/db": "workspace:*",
+    "@rp/events": "workspace:*",
     "@rp/ui": "workspace:*",
     "better-auth": "^1.4.0",
     "drizzle-orm": "^0.45.2",

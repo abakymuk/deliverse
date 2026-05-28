@@ -20,6 +20,8 @@
  * (APIError on missing brand subdomain etc); the wrapper just propagates.
  */
 
+import { queueAfterTransactionHook } from '@better-auth/core/context';
+import { appendEventAfterCommit } from '@rp/events/writer';
 import { APIError, type DBAdapter, type DBTransactionAdapter, type Where } from 'better-auth';
 import {
   OTP_MAX_FAILURES,
@@ -101,12 +103,70 @@ function wrapMethods(
     async create({ model, data, select, forceAllowId }) {
       if (model === 'user') {
         const ctx = await resolveTenantContext();
-        return inner.create({
+        const createPromise = inner.create({
           model,
           data: { ...data, tenantId: ctx.tenantId },
           select,
           forceAllowId,
         });
+
+        // DEL-29 / N2: schedule guest.signed_up event append AFTER tx commits.
+        // queueAfterTransactionHook runs after BA's tx commits (or immediately
+        // if there is no tx — e.g., the internalAdapter.createSession path is
+        // NOT wrapped in runWithTransaction). If BA's tx rolls back, the hook
+        // never runs → guarantee: "outbox row appended only if user committed."
+        //
+        // Promise-chain (not await+capture) so the typed return preserves BA's
+        // <T, R = T> generic binding through the cast at the return statement.
+        // Matches the verification branch's pattern below.
+        void createPromise.then(
+          (created) => {
+            const createdUser = created as unknown as {
+              id?: string;
+              email?: string;
+            };
+            const userId = createdUser.id;
+            const userEmail = createdUser.email;
+            if (!userId || !userEmail) return;
+            queueAfterTransactionHook(async () => {
+              try {
+                await appendEventAfterCommit({
+                  name: 'guest.signed_up',
+                  data: {
+                    tenantId: ctx.tenantId,
+                    occurredAt: new Date().toISOString(),
+                    actorType: 'tenant_end_user',
+                    actorId: userId,
+                    userId,
+                    email: userEmail,
+                    // TODO: thread real auth method (otp/password/oauth_google)
+                    // from BA route context. v1 accepts 'unknown'.
+                    method: 'unknown',
+                    storefrontId: ctx.storefrontId,
+                    brandId: ctx.brandId ?? null,
+                  },
+                });
+              } catch (err) {
+                // CRITICAL: swallow + structured log. BA's tx already committed
+                // by the time this hook runs — the user row IS in the DB.
+                // Letting this throw would trash the user's 2xx response with
+                // a 500 for a downstream durability gap they didn't cause.
+                // The log lets a future operator detect "user exists, no
+                // outbox row" and manually replay.
+                console.error('[outbox] guest.signed_up append failed', {
+                  err: err instanceof Error ? err.message : String(err),
+                  tenantId: ctx.tenantId,
+                  userId,
+                });
+              }
+            });
+          },
+          () => {
+            /* inner.create rejected; no event to schedule */
+          },
+        );
+
+        return createPromise as never;
       }
       if (model === 'session') {
         const ctx = await resolveTenantContext();
@@ -122,7 +182,7 @@ function wrapMethods(
         // replay (without this, BA's relational session+user lookup would
         // return cross-tenant data because the wrapper's user-side predicate
         // never runs as a separate hop).
-        return inner.create({
+        const createPromise = inner.create({
           model,
           data: {
             ...data,
@@ -132,6 +192,53 @@ function wrapMethods(
           select,
           forceAllowId,
         });
+
+        // DEL-29 / N2: schedule guest.signed_in event append AFTER tx commits.
+        // Same atomicity story + same chain-pattern rationale as guest.signed_up
+        // above. Note: OAuth/password signups create BOTH a user row AND a
+        // session row — both events fire (semantically correct: the user
+        // simultaneously signed up AND signed in).
+        void createPromise.then(
+          (created) => {
+            const createdSession = created as unknown as {
+              id?: string;
+              userId?: string;
+            };
+            const sessionId = createdSession.id;
+            const sessionUserId = createdSession.userId;
+            if (!sessionId || !sessionUserId) return;
+            queueAfterTransactionHook(async () => {
+              try {
+                await appendEventAfterCommit({
+                  name: 'guest.signed_in',
+                  data: {
+                    tenantId: ctx.tenantId,
+                    occurredAt: new Date().toISOString(),
+                    actorType: 'tenant_end_user',
+                    actorId: sessionUserId,
+                    userId: sessionUserId,
+                    sessionId,
+                    method: 'unknown',
+                    storefrontId: ctx.storefrontId,
+                    brandId: ctx.brandId ?? null,
+                  },
+                });
+              } catch (err) {
+                console.error('[outbox] guest.signed_in append failed', {
+                  err: err instanceof Error ? err.message : String(err),
+                  tenantId: ctx.tenantId,
+                  userId: sessionUserId,
+                  sessionId,
+                });
+              }
+            });
+          },
+          () => {
+            /* inner.create rejected; no event to schedule */
+          },
+        );
+
+        return createPromise as never;
       }
       if (model === 'verification') {
         const ctx = await resolveTenantContext();

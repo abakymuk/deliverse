@@ -7,6 +7,7 @@
     "./client": "./src/client.ts",
     "./events": "./src/events.ts",
     "./inngest": "./src/inngest/index.ts",
+    "./inngest/client": "./src/inngest/client.ts",
     "./templates/*": "./src/templates/*.tsx"
   },
   "scripts": {

@@ -16,6 +16,7 @@
     "@rp/auth-core": "workspace:*",
     "@rp/db": "workspace:*",
     "@rp/emails": "workspace:*",
+    "@rp/events": "workspace:*",
     "@rp/ui": "workspace:*",
     "better-auth": "^1.4.0",
     "inngest": "^4.4.0",
