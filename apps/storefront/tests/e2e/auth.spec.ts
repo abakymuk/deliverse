@@ -3,6 +3,8 @@ import { db } from '@rp/db';
 import { tenantEndUsers } from '@rp/db/schema';
 import { and, eq, isNull } from 'drizzle-orm';
 
+import { pollInngestDevForPasswordReset } from './helpers/inngest';
+
 /**
  * Storefront auth E2E tests
  *
@@ -113,6 +115,138 @@ test.describe('Cross-brand recognition (same tenant)', () => {
     await expect(page).toHaveURL(/pizza-express.*\/verify-otp/);
     await expect(page.getByText(/check your email/i)).toBeVisible();
     await expect(page.getByText(/welcome back/i)).not.toBeVisible();
+  });
+});
+
+test.describe('next-param propagation through forgot/reset (Phase 3 Step 2)', () => {
+  // Edge case: a `next` that itself contains `?` and `&`. Naive
+  // `&next=…` template appending breaks; URLSearchParams composition
+  // handles it correctly. Phase 3 Step 2 spec AC #4.
+  const nextWithQuery = '/checkout?ref=x&utm=y';
+  const encodedNext = encodeURIComponent(nextWithQuery);
+
+  // Track ephemeral users for cleanup.
+  const userIds: string[] = [];
+
+  test.afterAll(async () => {
+    for (const id of userIds) {
+      await db.delete(tenantEndUsers).where(eq(tenantEndUsers.id, id));
+    }
+  });
+
+  test('login.tsx propagates next to the forgot-password link via URLSearchParams', async ({
+    page,
+  }) => {
+    // Visit /login with an edge-case `next` and switch to password mode
+    // (the forgot-password link is only rendered in password mode).
+    await page.goto(`/login?next=${encodedNext}`);
+    await page.getByRole('button', { name: /sign in with password/i }).click();
+
+    // The "Forgot your password?" link should propagate `next` in its
+    // href via URLSearchParams composition. We assert on the substring
+    // because the link can include other params in any order.
+    const forgotLink = page.getByRole('link', { name: /forgot your password/i });
+    await expect(forgotLink).toBeVisible();
+    const href = await forgotLink.getAttribute('href');
+    expect(href, 'forgot link should include next-param').toContain(
+      `next=${encodedNext}`,
+    );
+  });
+
+  test('forgot-password form submits with redirectTo carrying next; Inngest event URL includes the encoded next in callbackURL', async ({
+    page,
+    request,
+  }) => {
+    // BA's request-password-reset is enumeration-safe — same success
+    // copy for both existing + non-existing emails, but the Inngest
+    // event is ONLY emitted when the user exists (BA's standard
+    // existence-check short-circuit). For the Inngest assertion to
+    // fire, we must first create a real user via HTTP signup.
+    const email = `step2-forgot-${Date.now()}@step2.test`;
+    const signup = await request.post(
+      'http://pizza-express.localhost:3001/api/auth/sign-up/email',
+      {
+        data: { email, password: 'step2-pass-12chars', name: 'Step 2 Test' },
+        headers: { Origin: 'http://pizza-express.localhost:3001' },
+      },
+    );
+    expect(signup.status(), `signup body: ${await signup.text()}`).toBe(200);
+
+    // Capture the inserted user id for afterAll cleanup.
+    const [user] = await db
+      .select({ id: tenantEndUsers.id })
+      .from(tenantEndUsers)
+      .where(
+        and(eq(tenantEndUsers.email, email), isNull(tenantEndUsers.deletedAt)),
+      )
+      .limit(1);
+    if (!user) throw new Error(`user row not written for ${email}`);
+    userIds.push(user.id);
+
+    // Navigate to /forgot-password?next=… (the form reads `next` from
+    // useSearchParams). Use the SAME email we just signed up.
+    await page.goto(`/forgot-password?next=${encodedNext}`);
+    await page.getByLabel(/email/i).fill(email);
+    await page.getByRole('button', { name: /send reset link/i }).click();
+    await expect(page.getByText(/check your email/i)).toBeVisible();
+
+    // BA emits `email.password_reset.requested` via Inngest. The event's
+    // `data.url` is the storefront-rewritten reset link (DEL-15) and
+    // has shape `<base>/reset-password/<token>?callbackURL=<encoded-redirectTo>`.
+    // We assert the callbackURL query param carries the next-param,
+    // proving the forgot form composed redirectTo correctly.
+    const poll = await pollInngestDevForPasswordReset(email, 30_000);
+    if (poll.status === 'unreachable') {
+      test.skip(
+        true,
+        'Inngest dev (:8288) not running — see AGENTS.md Gotchas. Start `inngest-cli dev` to run this assertion.',
+      );
+      return;
+    }
+    if (poll.status === 'timeout') {
+      throw new Error(
+        `password_reset event not found in Inngest dev within 30s. email=${email}`,
+      );
+    }
+
+    // Parse the BA-composed URL and assert callbackURL carries the
+    // next param exactly as we composed it.
+    const eventUrl = new URL(poll.url);
+    const callbackURL = eventUrl.searchParams.get('callbackURL');
+    expect(callbackURL, 'BA URL should carry our redirectTo as callbackURL').not.toBeNull();
+    // `callbackURL` is the un-decoded /reset-password URL (e.g.,
+    // "/reset-password?next=/checkout?ref=x&utm=y"). Parsing it as a
+    // URL is awkward because it's a relative path; just assert the
+    // next-param round-trips.
+    expect(callbackURL).toContain('next=');
+    expect(callbackURL).toContain(encodeURIComponent(nextWithQuery));
+  });
+
+  test('reset-password form renders with token + next', async ({ page }) => {
+    // We can't easily exercise the BA reset-password POST without a
+    // real token. Instead assert the DOM/URL chain: the form mounts
+    // with `next` in URL when both `token` and `next` query params are
+    // present, proving the token-required guard doesn't short-circuit.
+    await page.goto(
+      `/reset-password?token=fake-token-step2&next=${encodedNext}`,
+    );
+
+    // CardTitle from @rp/ui renders as <div>, not a heading element
+    // (precedent: this same fact is noted at the top of auth.spec.ts
+    // for the LoginForm rendering check). So we match on text rather
+    // than role=heading.
+    await expect(page.getByText('Reset your password').first()).toBeVisible();
+    await expect(page.getByLabel(/new password/i)).toBeVisible();
+    await expect(page.getByLabel(/confirm password/i)).toBeVisible();
+
+    // The success-redirect URL composition is a pure function of the
+    // URL search params. Verifying the success path with an actual
+    // token-submit would require a real BA reset (signup + forgot +
+    // poll for token + reset). That's heavier than the unit-level
+    // invariant being tested; for E2E we trust the form's
+    // URLSearchParams composition (verified by code review +
+    // typecheck) with this test asserting the form mounts cleanly
+    // when BOTH token and next are present in URL.
   });
 });
 

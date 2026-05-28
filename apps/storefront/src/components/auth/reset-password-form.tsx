@@ -3,8 +3,14 @@
 /**
  * Storefront reset-password form — same shape as platform reset-password.
  *
- * Reads `?token=...` from query; calls `authClient.resetPassword({
- * newPassword, token })`. On success, redirects to `/login?reset=success`.
+ * Reads `?token=...` from query (BA's `/reset-password/:token` callback
+ * appends it via `URL.searchParams.set`). Calls
+ * `authClient.resetPassword({ newPassword, token })`. On success,
+ * redirects to `/login?reset=success` plus any `?next=` that was
+ * carried through from the forgot-password flow.
+ *
+ * Phase 3 Step 2: propagate `?next=` from URL through the success
+ * redirect to login.
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -13,6 +19,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { Button } from '@rp/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import {
@@ -41,6 +48,16 @@ export function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get('token');
+  const rawNext = searchParams.get('next');
+  const next = safeNextPath(rawNext, '/account');
+
+  // Compose success-redirect URL via URLSearchParams so `next` values
+  // that contain `?` or `&` (e.g., `/checkout?ref=x`) round-trip safely.
+  const successHref = (
+    rawNext
+      ? `/login?${new URLSearchParams({ reset: 'success', next }).toString()}`
+      : '/login?reset=success'
+  ) as Route;
 
   const {
     control,
@@ -78,7 +95,7 @@ export function ResetPasswordForm() {
         });
         return;
       }
-      router.push('/login?reset=success' as Route);
+      router.push(successHref);
     } catch (err) {
       setError('root', {
         message: err instanceof Error ? err.message : 'Unknown error',

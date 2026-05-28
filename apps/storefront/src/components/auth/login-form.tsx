@@ -54,14 +54,23 @@ export function LoginForm() {
   const rawNext = searchParams.get('next');
   const next = safeNextPath(rawNext, '/account');
 
-  // Propagate `next` to /signup so the chain preserves the user's intent
-  // (e.g., /login?next=/checkout → /signup?next=/checkout). We only append
-  // when the user explicitly supplied a `next` param — empty/unsafe values
-  // already fell back to the default and don't need to be propagated.
-  // /forgot-password is intentionally skipped — that form doesn't consume
-  // `next` today, so propagating would create dead UX.
+  // Propagate `next` to /signup and /forgot-password so the chain preserves
+  // the user's intent (e.g., /login?next=/checkout → /signup?next=/checkout
+  // OR → /forgot-password?next=/checkout → /reset-password?next=/checkout
+  // → back to /login?reset=success&next=/checkout). We only append when the
+  // user explicitly supplied a `next` param — empty/unsafe values already
+  // fell back to the default and don't need to be propagated.
+  //
+  // `URLSearchParams` (vs. raw `encodeURIComponent`-into-template) is the
+  // safer composition for `next` values that themselves contain `?` or `&`
+  // (e.g., `/checkout?ref=x`). Phase 3 Step 2.
   const signupHref = (
-    rawNext ? `/signup?next=${encodeURIComponent(next)}` : '/signup'
+    rawNext ? `/signup?${new URLSearchParams({ next }).toString()}` : '/signup'
+  ) as Route;
+  const forgotPasswordHref = (
+    rawNext
+      ? `/forgot-password?${new URLSearchParams({ next }).toString()}`
+      : '/forgot-password'
   ) as Route;
 
   function toggleMode() {
@@ -84,6 +93,7 @@ export function LoginForm() {
             key="password"
             next={next}
             signupHref={signupHref}
+            forgotPasswordHref={forgotPasswordHref}
             onToggleMode={toggleMode}
           />
         )}
@@ -217,10 +227,12 @@ function OtpForm({
 function PasswordForm({
   next,
   signupHref,
+  forgotPasswordHref,
   onToggleMode,
 }: {
   next: string;
   signupHref: Route;
+  forgotPasswordHref: Route;
   onToggleMode: () => void;
 }) {
   const [googleLoading, setGoogleLoading] = useState(false);
@@ -312,7 +324,7 @@ function PasswordForm({
               <div className="flex items-center">
                 <FieldLabel htmlFor="pw-password">Password</FieldLabel>
                 <Link
-                  href={'/forgot-password' as Route}
+                  href={forgotPasswordHref}
                   className="ml-auto inline-block text-sm underline-offset-4 hover:underline"
                 >
                   Forgot your password?
