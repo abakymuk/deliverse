@@ -21,6 +21,10 @@
  */
 
 import { z } from 'zod';
+// Client-free subpath: resolves to packages/db/src/modifier-snapshot.ts (zod-only).
+// Importing the @rp/db root would pull in ./client.ts, which throws at module-init
+// if DATABASE_URL is unset — breaking the DB-less unit tests (writer.test.ts).
+import { modifierSnapshotsSchema } from '@rp/db/modifier-snapshot';
 
 // ── Common shapes ─────────────────────────────────────────────────────────
 
@@ -104,6 +108,9 @@ export const cartItemAdded = z.object({
     quantity: z.number().int().positive(),
     unitPriceCents: z.number().int().nonnegative(),
     locationId: z.string().uuid(),
+    // Additive (DEL-30) — event_version stays 1. Consumers tolerate its
+    // absence; writers emit [] until modifier UI lands (X3).
+    modifiers: modifierSnapshotsSchema.optional(),
   }),
 });
 

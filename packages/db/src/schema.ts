@@ -38,6 +38,7 @@ import {
   primaryKey,
 } from 'drizzle-orm/pg-core';
 import { sql, relations } from 'drizzle-orm';
+import type { ModifierSnapshot } from './modifier-snapshot';
 
 // ============================================================================
 // ENUMS
@@ -987,9 +988,8 @@ export const cartItems = pgTable('cart_items', {
 
   quantity: integer('quantity').notNull().default(1),
 
-  // Untyped jsonb in v1; v2 may pin a shape like
-  // Array<{ id, name, priceDelta }>.
-  modifiersJson: jsonb('modifiers_json').$type<Record<string, unknown>>().notNull().default({}),
+  // Typed per-line modifier snapshots (DEL-30). See ./modifier-snapshot.ts.
+  modifiersJson: jsonb('modifiers_json').$type<ModifierSnapshot[]>().notNull().default([]),
 
   // Snapshot at add-to-cart. See doc-comment above.
   unitPriceCents: integer('unit_price_cents').notNull(),
@@ -1091,7 +1091,8 @@ export const orderLineItems = pgTable('order_line_items', {
 
   quantity: integer('quantity').notNull(),
 
-  modifiersSnapshotJson: jsonb('modifiers_snapshot_json').$type<Record<string, unknown>>().notNull().default({}),
+  // Typed per-line modifier snapshots (DEL-30). See ./modifier-snapshot.ts.
+  modifiersSnapshotJson: jsonb('modifiers_snapshot_json').$type<ModifierSnapshot[]>().notNull().default([]),
 
   unitPriceCents: integer('unit_price_cents').notNull(),
   totalCents: integer('total_cents').notNull(),
