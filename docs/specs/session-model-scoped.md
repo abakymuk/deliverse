@@ -128,11 +128,7 @@ session: {
 
 ## Open Questions
 
-1. **Closing the cookieCache cross-tenant gap (follow-up, no Linear issue yet).** As documented in § Edge Cases #5, BA's cookieCache short-circuits the adapter on cache hits, so the SCOPED_MODELS extension only applies on cache misses + other adapter-routed session calls. Two viable closure paths:
-   - **BA `cookieCache.version` callback.** BA's session route reads a `versionConfig` callback at cache-validate time (`node_modules/better-auth/dist/api/routes/session.mjs`). If the callback returns the **current** tenant context's id (resolved from `next/headers`) and the cached payload's `version` field was set to the **session-writer** tenant's id at cache-write time, a cross-tenant replay forces a version mismatch → cache expires → DB lookup → predicate applies → cross-tenant rejected. Requires hooking `cookieCache.version` into `resolveStorefrontTenantContext` (which currently throws on bare-host post-redirect, so the version callback would need its own fallback — likely a separate header source via `x-storefront-id` injected by the proxy).
-   - **Next.js post-server-action-redirect Host fix.** If the bare-host bug is fixable upstream (or via a Next.js config — `experimental.serverActions.allowedOrigins` etc.) then disabling cookieCache becomes viable and the predicate runs unconditionally.
-
-   Either path is a small standalone PR — the schema + adapter changes shipping here lay the groundwork.
+_None — Open Question §1 (the cookieCache cross-tenant gap) was closed on 2026-05-27 by [`cookie-cache-tenant-version.md`](./cookie-cache-tenant-version.md) (Phase 3 M1). See § Decisions Log row dated 2026-05-27._
 
 ## Decisions Log
 
@@ -145,6 +141,7 @@ session: {
 | 2026-05-28 | No Linear issue | Small bug fix, ~30-60 min scope. Precedent: PR #58 OAuth fix shipped without Linear. Larger work would warrant a project + milestone. |
 | 2026-05-28 | Cross-tenant cookie tests restored in same PR | Tests + fix land together so reviewers can confirm both directions without separate PRs. |
 | 2026-05-28 | Keep `cookieCache` enabled despite the SCOPED_MODELS extension | Discovered mid-implementation: with `cookieCache.enabled: true`, BA's `get-session` decrypts the session payload from a separate `session_data` cookie without calling the adapter. Disabling it would force every request through the adapter and apply the tenant predicate — but it also broke `food-hall.spec.ts` end-to-end. Root cause: Next.js 16's post-server-action-redirect page render drops the storefront subdomain from `Host`, the wrapped adapter's `resolveStorefrontTenantContext` throws on the bare host, and the order detail page errors. With cookieCache on, the order detail page reads the cached session payload and never hits the adapter — no host-resolution required. The schema + write-side stamping in this fix still ship (every new session row carries `tenant_id`); restoring the cross-tenant replay tests is deferred to a follow-up that closes the cookieCache path properly. See § Open Questions §1. |
+| 2026-05-27 | **Closed: Open Question §1 — cookieCache cross-tenant gap.** Resolved by [`cookie-cache-tenant-version.md`](./cookie-cache-tenant-version.md) (Phase 3 M1). Took the BA `cookieCache.version` callback path (option 1 of the two listed in OQ §1); the upstream Next.js Host-drop fix (option 2) was unnecessary because the spec's Referer/Origin fallback in `resolveStorefrontTenantContext` + matching `x-storefront-id` injection in `proxy.ts` resolves the bare-host case in-tree. The cross-tenant cookie-replay e2e tests originally deferred during DEL-26 + this spec are restored as tests 2 + 3 in `apps/storefront/tests/e2e/cookie-isolation.spec.ts`. The cookieCache caveat in § Edge Cases #5 is superseded — the version callback evicts cross-tenant cached payloads on the read-path, then BA falls through to the wrapped adapter and the existing tenant predicate from this spec rejects the session row. |
 
 ---
 
