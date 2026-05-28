@@ -76,6 +76,34 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       fields: {
         userId: 'tenantEndUserId',
       },
+      // Phase 3 follow-up hotfix: BA defaults `storeStateStrategy` to
+      // 'database' when an adapter is configured
+      // (@better-auth/core/dist/context/create-context.mjs:133), which
+      // writes the OAuth PKCE state to `tenant_end_user_verifications` via
+      // `internalAdapter.createVerificationValue` with a random 32-char
+      // identifier (`@better-auth/dist/state.mjs:30-58`). The wrapped
+      // storefront adapter's `verification.create` calls
+      // `deriveVerificationType(identifier)` and throws
+      // `UNKNOWN_VERIFICATION_TYPE` because the random state doesn't match
+      // any known prefix (`sign-in-otp-` / `email-verification-otp-` /
+      // `forget-password-otp-` / `reset-password:`). Without this flip,
+      // every Google OAuth signin surfaces the error to the user
+      // verbatim — confirmed in prd at oomi-kitchen-test.deliverse.app the
+      // moment Step 4's `GOOGLE_CLIENT_ID`/`SECRET` went live.
+      //
+      // The cookie strategy stores the encrypted state in an
+      // `rp_store.oauth_state` cookie (10-min TTL, scoped to the exact
+      // storefront subdomain via `crossSubDomainCookies.enabled: false`).
+      // No verification row written → wrapper never sees the random
+      // identifier → handshake completes → `account.create` (which DOES
+      // route through the wrapper) stamps `tenantId` per DEL-12.
+      //
+      // The alternative — adding `'oauth_state'` to `verification_type`
+      // enum + extending `deriveVerificationType` to recognise the
+      // 32-char `[A-Za-z0-9_-]` shape — would require a schema migration
+      // for zero security benefit (state is ephemeral, lives 10 min, used
+      // once). Cookie strategy is the minimum-surface fix.
+      storeStateStrategy: 'cookie',
       additionalFields: {
         // DEL-12: BA's getAuthTables(options) only transforms fields it knows
         // about. Without this registration, the adapter wrapper's injected
