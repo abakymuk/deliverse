@@ -51,7 +51,13 @@ Tenant
 
 A tenant can operate multiple kitchens (locations) and run multiple brands (consumer-facing names). The M:N join `location_brands` supports dark kitchens where one kitchen serves multiple brands.
 
-**Storefront ≠ brand.** The current implementation runs one brand storefront per subdomain (`{brand}.deliverse.app`); the **target architecture** ([ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md)) additionally allows tenant-level food-hall storefronts that host multiple brands behind one URL with a unified cart. Mode 3 (food hall) is not yet implemented — see [`docs/planning/food-hall-architecture-linear-plan.md`](./planning/food-hall-architecture-linear-plan.md) for the delivery plan.
+**Storefront ≠ brand.** Customer-facing entry points are first-class `storefronts` rows ([ADR-0012](./decisions/0012-storefront-brand-tenant-food-hall-architecture.md)), separated from brand identity. A storefront is either brand-typed (`{brand-slug}.deliverse.app`) or tenant-typed (`{tenant-slug}.deliverse.app` — food hall). The cart is owned by `(tenant, location, customer)`; brand context lives on each `cart_items.brand_id` / `order_line_items.brand_id`. All three modes are supported in prd:
+
+| Mode | Description | Live example |
+|---|---|---|
+| 1 — Single-brand tenant | One tenant, one brand, one brand-type storefront. Degenerate case of mode N. | (any tenant with one brand) |
+| 2 — Multi-brand separate brand storefronts | One tenant, multiple brands, one brand-type storefront per brand. | `pizza-express.deliverse.app`, `burger-heaven.deliverse.app` (Hospitality Group) |
+| 3 — Food hall | One tenant, multiple brands, one tenant-type storefront curating the brands; unified cart spans brands; checkout produces one order with mixed-brand line items. | `oomi-kitchen-test.deliverse.app` (OOMI Kitchen) |
 
 ## Request flow: storefront login
 
