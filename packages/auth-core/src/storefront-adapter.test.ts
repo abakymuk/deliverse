@@ -186,8 +186,8 @@ describe('wrappedStorefrontAdapter — account lookups + mutations (DEL-12)', ()
   });
 });
 
-describe('wrappedStorefrontAdapter — non-account models unchanged (regression)', () => {
-  it('session.create stamps currentBrandId but NOT tenantId (sessions intentionally unscoped)', async () => {
+describe('wrappedStorefrontAdapter — non-account models', () => {
+  it('session.create stamps both currentBrandId AND tenantId (session-model-scoped)', async () => {
     const inner = makeInner();
     const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, resolver());
 
@@ -198,14 +198,19 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
 
     const call = inner.create.mock.calls[0]?.[0]?.data as Record<string, unknown>;
     expect(call?.currentBrandId).toBe(BRAND_ID);
-    expect(call?.tenantId).toBeUndefined();
+    // session-model-scoped (post-DEL-26): session.create stamps tenantId
+    // alongside currentBrandId. Closes the cross-tenant cookie-replay gap
+    // at the write layer — every session row carries its tenant boundary
+    // independently of the joined user row.
+    expect(call?.tenantId).toBe(TENANT_ID);
   });
 
-  it('session.create stamps currentBrandId NULL for tenant-mode sessions (DEL-21)', async () => {
+  it('session.create stamps currentBrandId NULL + tenantId UUID for tenant-mode sessions (DEL-21 + session-model-scoped)', async () => {
     const inner = makeInner();
     // Tenant-mode resolver: no brandId/brandSlug keys. Post-DEL-22 the BA
     // resolver returns this shape for tenant-host requests; the adapter
-    // stamps NULL for currentBrandId via the explicit `?? null`.
+    // stamps NULL for currentBrandId via the explicit `?? null`. tenantId
+    // is still stamped (security boundary unchanged).
     const tenantModeResolver: ResolveTenantContext = vi.fn(async () => ({
       tenantId: TENANT_ID,
       storefrontId: STOREFRONT_ID,
@@ -224,7 +229,9 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
     // replaces the explicit `?? null` with a conditional spread, which would
     // silently regress the tenant-mode invariant.
     expect(call?.currentBrandId).toBe(null);
-    expect(call?.tenantId).toBeUndefined();
+    // session-model-scoped: tenantId stays UUID for tenant-mode (only the
+    // brand context is optional; tenant context is always required).
+    expect(call?.tenantId).toBe(TENANT_ID);
   });
 
   it('verification.create stamps brandId NULL for tenant-mode (DEL-22)', async () => {
@@ -278,7 +285,7 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
     expect(data?.currentBrandId).toBeUndefined();
   });
 
-  it('session.findOne (by token) does NOT get a tenantId predicate', async () => {
+  it('session.findOne by token DOES get a tenantId predicate (session-model-scoped)', async () => {
     const inner = makeInner();
     const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, resolver());
 
@@ -287,9 +294,37 @@ describe('wrappedStorefrontAdapter — non-account models unchanged (regression)
       where: [{ field: 'token', value: 'sess-1', operator: 'eq', connector: 'AND' }],
     });
 
+    // session-model-scoped (post-DEL-26): the session-lookup-passes-through
+    // carve-out from the original DEL-3 design is closed. Cross-tenant
+    // cookie replay would otherwise hit BA's relational session+user join
+    // and return the wrong tenant's user. With the tenant predicate
+    // appended here, the cross-tenant token finds zero rows.
     expect(inner.findOne.mock.calls[0]?.[0]?.where).toEqual([
       { field: 'token', value: 'sess-1', operator: 'eq', connector: 'AND' },
+      tenantPredicate(),
     ]);
+  });
+
+  it('session.findMany / update / delete propagate tenantId predicate (session-model-scoped)', async () => {
+    const inner = makeInner();
+    const wrapped = wrappedStorefrontAdapter(inner as unknown as DBAdapter, resolver());
+
+    await wrapped.findMany({ model: 'session', where: [] });
+    await wrapped.update({
+      model: 'session',
+      where: [{ field: 'id', value: 's-1', operator: 'eq', connector: 'AND' }],
+      update: { expiresAt: new Date() },
+    });
+    await wrapped.delete({
+      model: 'session',
+      where: [{ field: 'id', value: 's-1', operator: 'eq', connector: 'AND' }],
+    });
+
+    for (const fn of [inner.findMany, inner.update, inner.delete]) {
+      expect(fn).toHaveBeenCalledTimes(1);
+      const where = fn.mock.calls[0]?.[0]?.where as unknown[];
+      expect(where).toContainEqual(tenantPredicate());
+    }
   });
 
   it('user.create stamps tenantId (regression: DEL-3 behavior preserved)', async () => {

@@ -29,8 +29,12 @@ import { and, eq, isNull } from 'drizzle-orm';
  * storefront. Per-storefront re-testing would re-test the same config.
  *
  * Related (out of scope here): the BA-side cross-tenant cookie replay
- * guard. See `docs/specs/food-hall-test-matrix.md` § "Open Questions"
- * for the defense-in-depth gap and the follow-up task that closes it.
+ * guard. session-model-scoped (post-DEL-26) shipped the schema +
+ * SCOPED_MODELS work but `cookieCache` short-circuits BA's `get-session`
+ * before the adapter is called, so cross-tenant replay during the
+ * cookieCache TTL still returns the source-tenant payload. See
+ * `docs/specs/food-hall-test-matrix.md` § Open Questions §2 for the
+ * remaining defense-in-depth gap and the planned follow-up.
  *
  * Spec: docs/specs/food-hall-test-matrix.md.
  */
@@ -100,10 +104,6 @@ async function signupAndCaptureSetCookies(
 }
 
 test.describe('DEL-26 — cookie isolation across storefronts', () => {
-  // Track ephemeral users for afterAll cleanup. Single test today, but
-  // the shape leaves room for future per-storefront cookie-config
-  // variants without restructuring (e.g., a tenant-host counterpart if
-  // BA ever diverges its cookie config by storefront type).
   const userIds: string[] = [];
 
   test.afterAll(async () => {

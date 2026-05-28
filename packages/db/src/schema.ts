@@ -705,6 +705,16 @@ export const tenantEndUserAccounts = pgTable('tenant_end_user_accounts', {
 export const tenantEndUserSessions = pgTable('tenant_end_user_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
 
+  // Tenant scoping — closes the cross-tenant cookie-replay defense-in-depth
+  // gap surfaced during DEL-26. BA's getSession does a relational lookup
+  // that joins user data inline; without a `tenant_id` on the session row,
+  // the wrapped adapter's user-side tenant predicate never gets a chance
+  // to filter the join. See docs/specs/session-model-scoped.md +
+  // ADR-0010 § Amendments.
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
   tenantEndUserId: uuid('tenant_end_user_id')
     .notNull()
     .references(() => tenantEndUsers.id, { onDelete: 'cascade' }),
@@ -725,6 +735,7 @@ export const tenantEndUserSessions = pgTable('tenant_end_user_sessions', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   tokenIdx: uniqueIndex('tenant_end_user_sessions_token_idx').on(t.token),
+  tenantIdx: index('tenant_end_user_sessions_tenant_idx').on(t.tenantId),
   userIdx: index('tenant_end_user_sessions_user_idx').on(t.tenantEndUserId),
   brandIdx: index('tenant_end_user_sessions_brand_idx').on(t.currentBrandId),
   expiresIdx: index('tenant_end_user_sessions_expires_idx').on(t.expiresAt),
