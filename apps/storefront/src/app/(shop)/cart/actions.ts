@@ -171,6 +171,9 @@ export async function addToCartAction(formData: FormData): Promise<void> {
         quantity,
         unitPriceCents: item.priceCents,
         locationId: cartLocationId,
+        // No modifier form data yet (lands in X3). Emit [] so consumers see
+        // the field; the cart_items insert above relies on the schema default.
+        modifiers: [],
       },
     });
   });
