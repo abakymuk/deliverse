@@ -24,6 +24,7 @@ import { type BetterAuthOptions, betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
 import { emailOTP } from 'better-auth/plugins';
 import { type ResolveTenantContext, wrappedStorefrontAdapter } from './storefront-adapter';
+import { testModeGoogleHooks } from './storefront-oauth-test-mode';
 import { isAllowedStorefrontOrigin } from './storefront-origin';
 import { rewriteStorefrontEmailUrl } from './storefront-url';
 
@@ -243,6 +244,16 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
       google: {
         clientId: process.env.GOOGLE_CLIENT_ID || '',
         clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+        // Test-mode hook overrides for DEL-12 OAuth e2e. CI sets
+        // BA_OAUTH_TEST_MODE=1 for the storefront e2e job ONLY — dev / stg /
+        // prd NEVER set this flag, so the spread below is a no-op there
+        // and BA's default Google `verifyIdToken` (real JWT verification
+        // against Google's JWKS) + default `getUserInfo` apply. See
+        // packages/auth-core/src/storefront-oauth-test-mode.ts header for
+        // the design rationale + the BA-source verification of the hook
+        // signatures + the (deliberately limited) defense-in-depth
+        // posture if the env var ever leaks.
+        ...(process.env.BA_OAUTH_TEST_MODE === '1' ? testModeGoogleHooks : {}),
       },
     },
 
