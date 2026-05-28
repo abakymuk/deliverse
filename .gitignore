@@ -38,6 +38,8 @@ Thumbs.db
 /playwright-report/
 /test-results/
 /playwright/.cache/
+apps/*/playwright-report/
+apps/*/test-results/
 
 # Drizzle
 /packages/db/drizzle/
