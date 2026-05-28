@@ -4,15 +4,24 @@
  * Storefront forgot-password form.
  *
  * Same shape as platform forgot-password — calls
- * `authClient.requestPasswordReset({ email, redirectTo: '/reset-password' })`
- * with enumeration-safe success copy regardless of email existence.
+ * `authClient.requestPasswordReset({ email, redirectTo })` with
+ * enumeration-safe success copy regardless of email existence.
  * BA's `redirectTo` is mandatory (`password.mjs:115`).
+ *
+ * Phase 3 Step 2: propagate `?next=` from URL through to the reset-password
+ * flow. `redirectTo` is BA's "where to send the user after they click the
+ * email link"; we compose it as `/reset-password?next=<safe>` so the
+ * eventual reset-password form lands with `next` in its query string. BA
+ * adds `?token=` to the redirect via `URL.searchParams.set` (preserves our
+ * existing query params).
  */
 
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useSearchParams } from 'next/navigation';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { Button } from '@rp/ui/components/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@rp/ui/components/card';
 import { Field, FieldError, FieldGroup, FieldLabel } from '@rp/ui/components/field';
@@ -26,6 +35,18 @@ const forgotSchema = z.object({
 type ForgotValues = z.infer<typeof forgotSchema>;
 
 export function ForgotPasswordForm() {
+  const searchParams = useSearchParams();
+  const rawNext = searchParams.get('next');
+  const next = safeNextPath(rawNext, '/account');
+
+  // Compose `redirectTo` for BA. `URLSearchParams` (vs. template
+  // concatenation + `encodeURIComponent`) handles `next` values that
+  // themselves contain `?` and `&` correctly — e.g., `/checkout?ref=x`
+  // would break naive `&next=…` appending.
+  const redirectTo = rawNext
+    ? `/reset-password?${new URLSearchParams({ next }).toString()}`
+    : '/reset-password';
+
   const {
     control,
     handleSubmit,
@@ -40,7 +61,7 @@ export function ForgotPasswordForm() {
     try {
       const result = await authClient.requestPasswordReset({
         email: values.email,
-        redirectTo: '/reset-password',
+        redirectTo,
       });
       if (result.error) {
         setError('root', { message: result.error.message ?? 'Could not send reset link' });
