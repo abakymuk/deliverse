@@ -109,6 +109,20 @@ export function createStorefrontAuth(resolveTenantContext: ResolveTenantContext)
         '*.deliverse.app',
         '*.staging.deliverse.app',
         '*.localhost:3001',
+        // Bare `localhost:3001` (no subdomain) — needed by Playwright's
+        // webServer probe in `apps/storefront/playwright.config.ts`. The
+        // probe hits `http://localhost:3001/api/auth/get-session` with no
+        // cookies to assert "server is up + BA initialised". BA returns
+        // 200 + JSON `null` (no session) IF baseURL resolves. Without
+        // this entry the wildcard requires a subdomain → BA throws
+        // BetterAuthError("Host ... not in allowed hosts") → probe times
+        // out → e2e job never starts. The proxy + tenant resolver still
+        // throw on bare-host for actual `/api/auth/*` traffic (e.g., the
+        // DEL-3 AC#5 negative test at
+        // `storefront-tenant-scoping.spec.ts:217` POSTs to bare
+        // localhost expecting 400 "no resolvable tenant") — the
+        // resolver gate is independent of BA's baseURL resolution.
+        'localhost:3001',
       ],
       protocol: 'auto',
     },
