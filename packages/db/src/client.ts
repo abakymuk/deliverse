@@ -30,3 +30,12 @@ const queryClient = postgres(connectionString, {
 export const db = drizzle(queryClient, { schema });
 
 export type Database = typeof db;
+
+/**
+ * Transaction type — the tx handle passed into `db.transaction(async (tx) => ...)`.
+ *
+ * Derived from Database['transaction']'s callback signature so it stays in sync
+ * with whichever Drizzle version is pinned. Consumers (e.g. @rp/events writer)
+ * accept `tx: Transaction` to thread atomicity across packages.
+ */
+export type Transaction = Parameters<Parameters<Database['transaction']>[0]>[0];

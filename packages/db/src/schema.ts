@@ -1101,6 +1101,93 @@ export const orderLineItems = pgTable('order_line_items', {
 }));
 
 // ============================================================================
+// EVENT OUTBOX (DEL-29 / N2)
+// ============================================================================
+//
+// Transactional outbox for domain events. Writers append rows in the SAME
+// db.transaction as their mutation (cart/checkout) or via BA's
+// queueAfterTransactionHook (guest signup/signin — post-commit). The
+// outbox-dispatcher Inngest cron (in @rp/events) polls, publishes via
+// step.sendEvent with a stable id for dedup, then batch-marks published_at.
+//
+// occurred_at = domain time (set by writer). created_at = wall-clock row
+// insert (defaultNow). For freshly-emitted events they're within ms;
+// backfilled/replayed events can diverge by hours/days.
+//
+// idempotency_key is per-event (userId / sessionId / orderId / null for
+// cart.item_added) and the partial unique index below enforces dedup for
+// BA retries. INSERT ... ON CONFLICT DO NOTHING in @rp/events writer.
+//
+// RLS-ready: tenant_id is the direct scoping column.
+
+export const eventOutbox = pgTable('event_outbox', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  // Bounded domain partition. Examples: 'guest', 'cart', 'order'.
+  aggregateType: text('aggregate_type').notNull(),
+  // Domain-meaningful UUID — points into the producing table. No FK because
+  // the consumer side doesn't care about referential integrity at this layer
+  // and FKs would prevent hard-delete cleanup workflows.
+  aggregateId: uuid('aggregate_id').notNull(),
+
+  // Dot-notation. Examples: 'guest.signed_up', 'order.placed'.
+  // Renamed via dual-emit window on payload-breaking changes (see
+  // packages/events/README.md deprecation lifecycle).
+  eventType: text('event_type').notNull(),
+  // Bumped only for breaking payload changes. Additive optional fields
+  // stay on the same version. Consumers tolerate unknown fields.
+  eventVersion: integer('event_version').notNull().default(1),
+
+  // Full event payload. Shape validated by Zod schemas in @rp/events.
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull(),
+
+  // NOT NULL — every event has an actor (defaults to 'system' if nothing
+  // else). Future agent/service-account events use other values.
+  actorType: text('actor_type').notNull(),
+  // Nullable for system-emitted events.
+  actorId: uuid('actor_id'),
+
+  // Used to dedup writer retries (BA flow replays, etc.).
+  // Enforced by the partial unique index below.
+  idempotencyKey: text('idempotency_key'),
+  // Tracing: id of the request that caused this event.
+  causationId: uuid('causation_id'),
+  // Tracing: id of the conceptual unit-of-work spanning multiple events.
+  correlationId: uuid('correlation_id'),
+
+  // Domain time of the event (set by writer).
+  occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull(),
+  // Wall-clock row creation (set by Postgres default).
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  // NULL until outbox-dispatcher publishes.
+  publishedAt: timestamp('published_at', { withTimezone: true }),
+}, (t) => ({
+  // Dispatcher claim hot-path: scan unpublished rows by occurred_at.
+  pendingIdx: index('event_outbox_pending_idx')
+    .on(t.occurredAt)
+    .where(sql`${t.publishedAt} IS NULL`),
+
+  // Consumer hot-path: "all events for aggregate X, in order."
+  aggregateIdx: index('event_outbox_aggregate_idx')
+    .on(t.tenantId, t.aggregateType, t.aggregateId, t.occurredAt),
+
+  // Consumer hot-path: "all guest.signed_up events for tenant Y."
+  eventTypeIdx: index('event_outbox_event_type_idx')
+    .on(t.tenantId, t.eventType, t.occurredAt),
+
+  // Idempotency: enforce uniqueness ONLY when idempotency_key is non-null.
+  // Without this, the field is decorative — a BA retry would double-publish.
+  // Pair with INSERT ... ON CONFLICT DO NOTHING in @rp/events writer.
+  idempotencyUnique: uniqueIndex('event_outbox_idempotency_unique')
+    .on(t.tenantId, t.eventType, t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
+}));
+
+// ============================================================================
 // TYPE HELPERS (for application code)
 // ============================================================================
 
@@ -1149,6 +1236,10 @@ export type NewOrder = typeof orders.$inferInsert;
 
 export type OrderLineItem = typeof orderLineItems.$inferSelect;
 export type NewOrderLineItem = typeof orderLineItems.$inferInsert;
+
+// DEL-29: event outbox
+export type EventOutbox = typeof eventOutbox.$inferSelect;
+export type NewEventOutbox = typeof eventOutbox.$inferInsert;
 
 // ============================================================================
 // RELATIONS (for Drizzle's relational queries)

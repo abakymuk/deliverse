@@ -3,6 +3,7 @@
 import { db } from '@rp/db';
 import { cartItems, carts, locationBrands } from '@rp/db/schema';
 import { safeNextPath } from '@rp/auth-core/safe-next-path';
+import { appendEvent } from '@rp/events/writer';
 import { and, eq, isNull } from 'drizzle-orm';
 import { revalidatePath } from 'next/cache';
 import { headers } from 'next/headers';
@@ -104,6 +105,7 @@ export async function addToCartAction(formData: FormData): Promise<void> {
 
   // 5. Cart location resolution.
   let cartId: string;
+  let cartLocationId: string;
   if (existingCart) {
     // Verify the validated brand is served at the existing cart's
     // location_id via location_brands. Edge case for v1 single-location
@@ -124,6 +126,7 @@ export async function addToCartAction(formData: FormData): Promise<void> {
       );
     }
     cartId = existingCart.id;
+    cartLocationId = existingCart.locationId;
   } else {
     // New cart — pick the brand-aware default location.
     const location = await getDefaultLocation(ctx.tenantId, item.brandId);
@@ -133,15 +136,43 @@ export async function addToCartAction(formData: FormData): Promise<void> {
       location.id,
     );
     cartId = newCart.id;
+    cartLocationId = location.id;
   }
 
-  // 6. Insert the cart_item with snapshot price.
-  await db.insert(cartItems).values({
-    cartId,
-    brandId: item.brandId,
-    menuItemId: item.menuItemId,
-    quantity,
-    unitPriceCents: item.priceCents,
+  // 6. Insert the cart_item with snapshot price + emit cart.item_added in
+  // the same tx. DEL-29 / N2: outbox row commits with the cart_items row
+  // or rolls back together. The dispatcher publishes asynchronously.
+  await db.transaction(async (tx) => {
+    const [cartItem] = await tx
+      .insert(cartItems)
+      .values({
+        cartId,
+        brandId: item.brandId,
+        menuItemId: item.menuItemId,
+        quantity,
+        unitPriceCents: item.priceCents,
+      })
+      .returning({ id: cartItems.id });
+    if (!cartItem) {
+      throw new Error('addToCartAction: failed to insert cart_item');
+    }
+
+    await appendEvent(tx, {
+      name: 'cart.item_added',
+      data: {
+        tenantId: ctx.tenantId,
+        occurredAt: new Date().toISOString(),
+        actorType: 'tenant_end_user',
+        actorId: tenantEndUserId,
+        cartId,
+        cartItemId: cartItem.id,
+        brandId: item.brandId,
+        menuItemId: item.menuItemId,
+        quantity,
+        unitPriceCents: item.priceCents,
+        locationId: cartLocationId,
+      },
+    });
   });
 
   // 7. Revalidate the cart page + the rendering route (sanitized).
