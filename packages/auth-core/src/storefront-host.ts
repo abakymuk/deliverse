@@ -1,29 +1,16 @@
 /**
- * Pure helpers for storefront subdomain → brand-slug extraction.
+ * Pure helpers for storefront subdomain → storefront-slug extraction.
  *
  * Lives in @rp/auth-core (not apps/storefront) so the adapter wrapper can
  * use it without an apps→packages dependency. The app's
- * `tenant-resolution.ts` re-exports `extractBrandSlug` for proxy / server
- * component callers.
+ * `tenant-resolution.ts` re-exports an env-wrapped variant for proxy /
+ * server-component callers.
  *
- * Spec: docs/specs/storefront-tenant-scoping.md §8.
+ * Spec: docs/specs/storefront-host-resolution.md (DEL-20).
  */
 
 const RESERVED_SUBDOMAINS = new Set(['www', 'admin', 'api', 'app']);
 
-/**
- * Extract the brand slug from a Host header value.
- *
- * Examples:
- *   extractBrandSlug('pizza-express.deliverse.app', 'deliverse.app') → 'pizza-express'
- *   extractBrandSlug('pizza-express.localhost:3001', 'localhost:3001') → 'pizza-express'
- *   extractBrandSlug('deliverse.app', 'deliverse.app') → null  (root, no brand)
- *   extractBrandSlug('admin.deliverse.app', 'deliverse.app') → null  (reserved)
- *   extractBrandSlug(null, 'deliverse.app') → null
- *
- * Port is stripped from both sides before comparison, matching the
- * `isAllowedStorefrontOrigin` helper in `storefront-origin.ts`.
- */
 /**
  * Lowercase + strip optional `<scheme>://` prefix + strip optional `:port`
  * suffix. Tolerates both `localhost:3001` and `http://localhost:3001`
@@ -43,36 +30,6 @@ function normalizeDomain(s: string): string {
 }
 
 /**
- * @deprecated DEL-22 — prefer {@link extractStorefrontSlug}, which has the
- * same semantics today but is the API surface that survives the brand-optional
- * BA refactor. Both functions return the same string for any given host
- * post-DEL-19 (every brand has a matching storefront row).
- *
- * Better-Auth's storefront adapter wrapper still consumes `extractBrandSlug`;
- * once that path goes brand-optional, callers migrate to `extractStorefrontSlug`
- * and this export is removed.
- */
-export function extractBrandSlug(
-  host: string | null | undefined,
-  baseDomain: string | undefined,
-): string | null {
-  if (!host || !baseDomain) return null;
-
-  const h = normalizeDomain(host);
-  const b = normalizeDomain(baseDomain);
-  if (!h || !b) return null;
-
-  if (h === b) return null;
-  if (!h.endsWith(`.${b}`)) return null;
-
-  const subdomain = h.slice(0, -(b.length + 1));
-  const [brandSlug = ''] = subdomain.split('.');
-
-  if (!brandSlug || RESERVED_SUBDOMAINS.has(brandSlug)) return null;
-  return brandSlug;
-}
-
-/**
  * Extract the storefront slug from a Host header value, respecting reserved
  * subdomains. The storefront slug is the leading subdomain; the brand-vs-tenant
  * discriminator is resolved separately by {@link resolveStorefrontBySlug}.
@@ -84,9 +41,8 @@ export function extractBrandSlug(
  *   extractStorefrontSlug('deliverse.app', 'deliverse.app') → null  (no subdomain)
  *   extractStorefrontSlug(null, 'deliverse.app') → null
  *
- * Same logic as {@link extractBrandSlug} (deprecated) — both extractors return
- * the same value today. The duplication is intentional during DEL-20 → DEL-22
- * transition to keep the brand-slug code path bit-stable.
+ * Port is stripped from both sides before comparison, matching the
+ * `isAllowedStorefrontOrigin` helper in `storefront-origin.ts`.
  */
 export function extractStorefrontSlug(
   host: string | null | undefined,
