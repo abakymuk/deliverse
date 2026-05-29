@@ -4,8 +4,8 @@ import {
   brands,
   cartItems,
   carts,
-  orderLineItems,
-  orders,
+  orderIntentItems,
+  orderIntents,
   tenantEndUserSessions,
   tenantEndUsers,
   tenants,
@@ -101,10 +101,10 @@ test.describe
     });
 
     test.afterAll(async () => {
-      // Order before user — `orders.tenant_end_user_id SET NULL` policy
-      // means the row stays after user delete but is no longer findable
-      // by user id (matches food-hall.spec.ts cleanup pattern).
-      if (orderId) await db.delete(orders).where(eq(orders.id, orderId));
+      // Intent before user — `order_intents.tenant_end_user_id SET NULL`
+      // policy means the row stays after user delete but is no longer
+      // findable by user id (matches food-hall.spec.ts cleanup pattern).
+      if (orderId) await db.delete(orderIntents).where(eq(orderIntents.id, orderId));
       if (signupUserId)
         await db.delete(tenantEndUsers).where(eq(tenantEndUsers.id, signupUserId));
       if (dbUserId)
@@ -219,28 +219,28 @@ test.describe
       expect(cartLines).toHaveLength(1);
       expect(cartLines[0]?.brandId).toBe(soloBrandId);
 
-      // === Order ===
+      // === Order intent (DEL-32 / X1) ===
       const subtotalCents = 450 * 2; // 900
       const [order] = await db
-        .insert(orders)
+        .insert(orderIntents)
         .values({
           tenantId: soloTenantId,
           locationId: SOLO_LOCATION_ID,
           tenantEndUserId: user.id,
-          status: 'confirmed',
-          fulfillmentType: 'pickup',
+          placedByActorType: 'tenant_end_user',
+          placedByActorId: user.id,
           subtotalCents,
           taxCents: 0,
           feeCents: 0,
           tipCents: 0,
           totalCents: subtotalCents,
         })
-        .returning({ id: orders.id });
-      if (!order) throw new Error('failed to insert order');
+        .returning({ id: orderIntents.id });
+      if (!order) throw new Error('failed to insert order intent');
       orderId = order.id;
 
-      await db.insert(orderLineItems).values({
-        orderId: order.id,
+      await db.insert(orderIntentItems).values({
+        orderIntentId: order.id,
         brandId: soloBrandId,
         brandNameSnapshot: 'Solo Cafe',
         menuItemIdSnapshot: SOLO_ITEM_ESPRESSO_ID,
@@ -250,17 +250,17 @@ test.describe
         totalCents: 900,
       });
 
-      // === Assertions on the order line item shape ===
+      // === Assertions on the order intent item shape ===
       const lines = await db
         .select({
-          brandId: orderLineItems.brandId,
-          brandNameSnapshot: orderLineItems.brandNameSnapshot,
-          nameSnapshot: orderLineItems.nameSnapshot,
-          quantity: orderLineItems.quantity,
-          totalCents: orderLineItems.totalCents,
+          brandId: orderIntentItems.brandId,
+          brandNameSnapshot: orderIntentItems.brandNameSnapshot,
+          nameSnapshot: orderIntentItems.nameSnapshot,
+          quantity: orderIntentItems.quantity,
+          totalCents: orderIntentItems.totalCents,
         })
-        .from(orderLineItems)
-        .where(eq(orderLineItems.orderId, order.id));
+        .from(orderIntentItems)
+        .where(eq(orderIntentItems.orderIntentId, order.id));
       expect(lines).toHaveLength(1);
       const [line] = lines;
       if (!line) throw new Error('unreachable — length asserted above');

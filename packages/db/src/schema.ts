@@ -94,27 +94,48 @@ export const cartStatusEnum = pgEnum('cart_status', [
   'converted',
 ]);
 
-// Order lifecycle. Includes KDS-ready states ('preparing', 'ready') up
-// front to avoid a future migration when the kitchen-display work begins,
-// even though they're unread at DEL-24 PR time. 'completed' = handed off
-// to the customer (pickup picked up, delivery delivered). 'cancelled' =
-// no-go; orders are never hard-deleted — historical/audit record.
-export const orderStatusEnum = pgEnum('order_status', [
-  'pending',
-  'confirmed',
+// DEL-32 / X1: the old single `order_status` enum conflated customer intent
+// with kitchen fulfillment. It is split into the two machines below —
+// `order_intent_status` (intent) + `fulfillment_status` (per-brand ticket).
+// The old `order_status` enum + `orders` table are removed in migration 0011.
+
+// Intent lifecycle — what the customer committed to. Intent-only; never
+// carries kitchen states.
+export const orderIntentStatusEnum = pgEnum('order_intent_status', [
+  'placed',
+  'cancelled',
+]);
+
+// Per-(intent, brand) fulfillment lifecycle — the KDS ticket. The kitchen
+// half of the old order_status enum; X6 (KDS) drives the transitions. The
+// canonical transition map + validator live in ./fulfillment-status.ts.
+export const fulfillmentStatusEnum = pgEnum('fulfillment_status', [
+  'queued',
   'preparing',
   'ready',
   'completed',
   'cancelled',
 ]);
 
-// Fulfillment type, orthogonal to order_status. Order status describes
-// kitchen lifecycle; fulfillment describes pickup vs delivery. A future
-// `delivery_status` enum (e.g., unassigned|assigned|picked_up|delivered|
-// failed) can be added separately without touching this enum.
+// Actor identity for audit / agent telemetry (DEL-33 / X2). Declared in the
+// EXACT order of @rp/events `actorType` (packages/events/src/schema.ts): a
+// pgEnum's declaration order is its sort order, and a parity test in
+// @rp/events asserts the two lists stay identical.
+export const actorTypeEnum = pgEnum('actor_type', [
+  'tenant_end_user',
+  'platform_user',
+  'service_account',
+  'agent',
+  'system',
+]);
+
+// Fulfillment type, orthogonal to status. Status describes the lifecycle;
+// fulfillment_type describes pickup vs delivery vs dine-in. Used by carts +
+// order_fulfillments. 'dine_in' added in DEL-32 / X1.
 export const fulfillmentTypeEnum = pgEnum('fulfillment_type', [
   'pickup',
   'delivery',
+  'dine_in',
 ]);
 
 // ============================================================================
@@ -1003,17 +1024,20 @@ export const cartItems = pgTable('cart_items', {
 }));
 
 /**
- * orders — submitted orders
+ * order_intents — the order aggregate root (DEL-32 / X1).
  *
- * Append-only historical records. NO deletedAt — cancel via
- * status='cancelled'. NO brand_id ownership column (AC#3).
+ * What the customer committed to ("placed"). Intent-only status — the
+ * kitchen lifecycle lives on order_fulfillments. Append-only historical
+ * record (no deletedAt; cancel via status='cancelled'). Mirrors the old
+ * `orders` tenant/GDPR design: tenant_id direct (CASCADE); tenant_end_user_id
+ * nullable + SET NULL so single-user GDPR delete preserves the record.
  *
- * tenant_end_user_id is NULLABLE + ON DELETE SET NULL so single-user GDPR
- * deletion preserves the order as an anonymous historical record. Tenant
- * hard-delete still cascades through orders via tenant_id CASCADE (full-
- * tenant GDPR cleanup).
+ * created_at IS the placement time in v1 (intent is born 'placed'; no draft
+ * state). idempotency_key is the agent/API dedup (L3) — storefront writes
+ * NULL and relies on the cart-conversion guard. placed_by_actor_* stamps the
+ * actor (DEL-33 / X2).
  */
-export const orders = pgTable('orders', {
+export const orderIntents = pgTable('order_intents', {
   id: uuid('id').primaryKey().defaultRandom(),
 
   tenantId: uuid('tenant_id')
@@ -1024,15 +1048,22 @@ export const orders = pgTable('orders', {
     .notNull()
     .references(() => locations.id, { onDelete: 'cascade' }),
 
-  // NULLABLE + SET NULL — preserves order history through single-user
-  // GDPR delete. See spec § "Edge Cases" + § "Intentional Deviation".
+  // NULLABLE + SET NULL — preserves intent history through single-user GDPR
+  // delete (same policy as the old orders table).
   tenantEndUserId: uuid('tenant_end_user_id')
     .references(() => tenantEndUsers.id, { onDelete: 'set null' }),
 
-  status: orderStatusEnum('status').notNull().default('pending'),
+  // Origin of the intent. text (not enum) — channels proliferate.
+  channel: text('channel').notNull().default('storefront'),
 
-  // No default — every order must declare its fulfillment mode at create.
-  fulfillmentType: fulfillmentTypeEnum('fulfillment_type').notNull(),
+  // Actor stamp (DEL-33 / X2). actor_id is an application-level pointer —
+  // no FK (may reference platform_users OR tenant_end_users OR nothing).
+  placedByActorType: actorTypeEnum('placed_by_actor_type').notNull(),
+  placedByActorId: uuid('placed_by_actor_id'),
+
+  // Agent/API order-creation dedup (L3). Storefront writes NULL (the cart
+  // guard is the storefront dedup); the partial-unique index ignores NULLs.
+  idempotencyKey: text('idempotency_key'),
 
   subtotalCents: integer('subtotal_cents').notNull(),
   taxCents: integer('tax_cents').notNull().default(0),
@@ -1040,53 +1071,43 @@ export const orders = pgTable('orders', {
   tipCents: integer('tip_cents').notNull().default(0),
   totalCents: integer('total_cents').notNull(),
 
+  status: orderIntentStatusEnum('status').notNull().default('placed'),
+
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
-  tenantIdx: index('orders_tenant_idx').on(t.tenantId),
-  userIdx: index('orders_user_idx').on(t.tenantEndUserId),
-  locationIdx: index('orders_location_idx').on(t.locationId),
-  statusIdx: index('orders_status_idx').on(t.status),
-  createdAtIdx: index('orders_created_at_idx').on(t.createdAt),
-  // Composite for tenant-scoped recency queries (admin "recent orders"
-  // view, cron jobs that walk per-tenant by created_at, etc.).
-  tenantCreatedAtIdx: index('orders_tenant_created_at_idx').on(t.tenantId, t.createdAt.desc()),
+  // Tenant-scoped recency (admin "recent orders", per-tenant cron walks).
+  tenantCreatedAtIdx: index('order_intents_tenant_created_at_idx').on(t.tenantId, t.createdAt.desc()),
+  userIdx: index('order_intents_user_idx').on(t.tenantEndUserId),
+  locationIdx: index('order_intents_location_idx').on(t.locationId),
+  // Agent/API idempotency — UNIQUE per tenant, ignoring storefront NULLs.
+  idempotencyUnique: uniqueIndex('order_intents_idempotency_unique')
+    .on(t.tenantId, t.idempotencyKey)
+    .where(sql`${t.idempotencyKey} IS NOT NULL`),
 }));
 
 /**
- * order_line_items — immutable line items inside an order
- *
- * brand_id is NULLABLE + ON DELETE SET NULL — intentional deviation from
- * AC#4 to preserve audit history through single-brand removal.
- * brand_name_snapshot carries the brand identity forward when the FK is
- * SET NULL. cart_items.brand_id stays NOT NULL (transient row).
- *
- * menu_item_id_snapshot is a soft pointer (no .references()) — survives
- * menu_item hard-delete. name_snapshot + modifiers_snapshot_json carry
- * the line's content forward.
- *
- * No timestamps, no soft delete — created with the order and never
- * edited.
+ * order_intent_items — immutable snapshot lines inside an order intent
+ * (DEL-32 / X1). Mirrors the old order_line_items exactly: brand_id nullable
+ * + SET NULL with brand_name_snapshot carrying identity forward; soft
+ * menu_item_id_snapshot; typed modifier snapshots. No timestamps, no soft
+ * delete — created with the intent, never edited.
  */
-export const orderLineItems = pgTable('order_line_items', {
+export const orderIntentItems = pgTable('order_intent_items', {
   id: uuid('id').primaryKey().defaultRandom(),
 
-  orderId: uuid('order_id')
+  orderIntentId: uuid('order_intent_id')
     .notNull()
-    .references(() => orders.id, { onDelete: 'cascade' }),
+    .references(() => orderIntents.id, { onDelete: 'cascade' }),
 
-  // NULLABLE + SET NULL — see header comment.
+  // NULLABLE + SET NULL — preserves audit history through single-brand
+  // hard-delete; brand_name_snapshot carries the identity forward.
   brandId: uuid('brand_id')
     .references(() => brands.id, { onDelete: 'set null' }),
-
-  // Required so analytics can still attribute the line to a brand by name
-  // after a brand hard-delete clears the FK.
   brandNameSnapshot: text('brand_name_snapshot').notNull(),
 
-  // Soft pointer: no .references(), no FK integrity. Survives menu_item
-  // hard-delete. Orphan IDs are acceptable for a snapshot.
+  // Soft pointer (no .references()) — survives menu_item hard-delete.
   menuItemIdSnapshot: uuid('menu_item_id_snapshot'),
-
   nameSnapshot: text('name_snapshot').notNull(),
 
   quantity: integer('quantity').notNull(),
@@ -1097,8 +1118,103 @@ export const orderLineItems = pgTable('order_line_items', {
   unitPriceCents: integer('unit_price_cents').notNull(),
   totalCents: integer('total_cents').notNull(),
 }, (t) => ({
-  orderIdx: index('order_line_items_order_idx').on(t.orderId),
-  brandIdx: index('order_line_items_brand_idx').on(t.brandId),
+  intentIdx: index('order_intent_items_intent_idx').on(t.orderIntentId),
+  brandIdx: index('order_intent_items_brand_idx').on(t.brandId),
+}));
+
+/**
+ * order_fulfillments — one per (intent, brand); the KDS ticket and query
+ * root (DEL-32 / X1). Carries a DENORMALIZED tenant_id so KDS (X6) can query
+ * (tenant_id, location_id, status) without joining through order_intents —
+ * same denormalization as orders/carts. brand_id nullable + SET NULL with
+ * brand_name_snapshot. status is the kitchen lifecycle (fulfillment_status);
+ * transitions are validated by ./fulfillment-status.ts and driven by X6.
+ */
+export const orderFulfillments = pgTable('order_fulfillments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  orderIntentId: uuid('order_intent_id')
+    .notNull()
+    .references(() => orderIntents.id, { onDelete: 'cascade' }),
+
+  // Denormalized for the KDS query root (X6); CASCADE for tenant GDPR cleanup.
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  // NULLABLE + SET NULL — brand_name_snapshot carries identity forward.
+  brandId: uuid('brand_id')
+    .references(() => brands.id, { onDelete: 'set null' }),
+  brandNameSnapshot: text('brand_name_snapshot').notNull(),
+
+  locationId: uuid('location_id')
+    .notNull()
+    .references(() => locations.id, { onDelete: 'cascade' }),
+
+  fulfillmentType: fulfillmentTypeEnum('fulfillment_type').notNull(),
+  status: fulfillmentStatusEnum('status').notNull().default('queued'),
+
+  estimatedReadyAt: timestamp('estimated_ready_at', { withTimezone: true }),
+  completedAt: timestamp('completed_at', { withTimezone: true }),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  intentIdx: index('order_fulfillments_intent_idx').on(t.orderIntentId),
+  // The KDS list query: open tickets for a tenant's location, by status.
+  tenantLocationStatusIdx: index('order_fulfillments_tenant_location_status_idx')
+    .on(t.tenantId, t.locationId, t.status),
+}));
+
+/**
+ * order_fulfillment_items — maps intent items into a fulfillment ticket
+ * (DEL-32 / X1). Exists to allow future splits/merges; v1 maps each intent
+ * item fully into its brand's single fulfillment.
+ */
+export const orderFulfillmentItems = pgTable('order_fulfillment_items', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  orderFulfillmentId: uuid('order_fulfillment_id')
+    .notNull()
+    .references(() => orderFulfillments.id, { onDelete: 'cascade' }),
+
+  orderIntentItemId: uuid('order_intent_item_id')
+    .notNull()
+    .references(() => orderIntentItems.id, { onDelete: 'cascade' }),
+
+  quantity: integer('quantity').notNull(),
+}, (t) => ({
+  fulfillmentIdx: index('order_fulfillment_items_fulfillment_idx').on(t.orderFulfillmentId),
+  intentItemIdx: index('order_fulfillment_items_intent_item_idx').on(t.orderIntentItemId),
+}));
+
+/**
+ * order_modifications — append-only log of post-placement changes to an
+ * intent (DEL-32 / X1): comps, partial cancels, price adjustments, refunds
+ * (X4 links here). The table lands now so X4/refunds can reference it; the
+ * mutation FLOWS are out of scope for X1 (created empty, no backfill).
+ */
+export const orderModifications = pgTable('order_modifications', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  orderIntentId: uuid('order_intent_id')
+    .notNull()
+    .references(() => orderIntents.id, { onDelete: 'cascade' }),
+
+  // Free-form discriminator for v1 (e.g. 'comp', 'partial_cancel',
+  // 'price_adjust', 'refund'); typed when the modification flows land.
+  kind: text('kind').notNull(),
+
+  // Actor stamp (DEL-33 / X2).
+  actorType: actorTypeEnum('actor_type').notNull(),
+  actorId: uuid('actor_id'),
+
+  payload: jsonb('payload').$type<Record<string, unknown>>().notNull().default({}),
+  financialDeltaCents: integer('financial_delta_cents').notNull().default(0),
+
+  appliedAt: timestamp('applied_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  intentIdx: index('order_modifications_intent_idx').on(t.orderIntentId),
 }));
 
 // ============================================================================
@@ -1135,7 +1251,7 @@ export const eventOutbox = pgTable('event_outbox', {
   // and FKs would prevent hard-delete cleanup workflows.
   aggregateId: uuid('aggregate_id').notNull(),
 
-  // Dot-notation. Examples: 'guest.signed_up', 'order.placed'.
+  // Dot-notation. Examples: 'guest.signed_up', 'order_intent.placed'.
   // Renamed via dual-emit window on payload-breaking changes (see
   // packages/events/README.md deprecation lifecycle).
   eventType: text('event_type').notNull(),
@@ -1232,11 +1348,20 @@ export type NewCart = typeof carts.$inferInsert;
 export type CartItem = typeof cartItems.$inferSelect;
 export type NewCartItem = typeof cartItems.$inferInsert;
 
-export type Order = typeof orders.$inferSelect;
-export type NewOrder = typeof orders.$inferInsert;
+export type OrderIntent = typeof orderIntents.$inferSelect;
+export type NewOrderIntent = typeof orderIntents.$inferInsert;
 
-export type OrderLineItem = typeof orderLineItems.$inferSelect;
-export type NewOrderLineItem = typeof orderLineItems.$inferInsert;
+export type OrderIntentItem = typeof orderIntentItems.$inferSelect;
+export type NewOrderIntentItem = typeof orderIntentItems.$inferInsert;
+
+export type OrderFulfillment = typeof orderFulfillments.$inferSelect;
+export type NewOrderFulfillment = typeof orderFulfillments.$inferInsert;
+
+export type OrderFulfillmentItem = typeof orderFulfillmentItems.$inferSelect;
+export type NewOrderFulfillmentItem = typeof orderFulfillmentItems.$inferInsert;
+
+export type OrderModification = typeof orderModifications.$inferSelect;
+export type NewOrderModification = typeof orderModifications.$inferInsert;
 
 // DEL-29: event outbox
 export type EventOutbox = typeof eventOutbox.$inferSelect;
@@ -1260,7 +1385,8 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   storefronts: many(storefronts),
   // DEL-24: commerce.
   carts: many(carts),
-  orders: many(orders),
+  orderIntents: many(orderIntents),
+  orderFulfillments: many(orderFulfillments),
 }));
 
 export const brandsRelations = relations(brands, ({ one, many }) => ({
@@ -1277,7 +1403,8 @@ export const brandsRelations = relations(brands, ({ one, many }) => ({
   // brand → menus → menu_items per ADR-0012 / spec § "Data Model Changes".
   menus: many(menus),
   cartItems: many(cartItems),
-  orderLineItems: many(orderLineItems),
+  orderIntentItems: many(orderIntentItems),
+  orderFulfillments: many(orderFulfillments),
 }));
 
 export const storefrontsRelations = relations(storefronts, ({ one }) => ({
@@ -1299,7 +1426,8 @@ export const locationsRelations = relations(locations, ({ one, many }) => ({
   brands: many(locationBrands),
   // DEL-24: commerce.
   carts: many(carts),
-  orders: many(orders),
+  orderIntents: many(orderIntents),
+  orderFulfillments: many(orderFulfillments),
 }));
 
 export const locationBrandsRelations = relations(locationBrands, ({ one }) => ({
@@ -1322,7 +1450,7 @@ export const tenantEndUsersRelations = relations(tenantEndUsers, ({ one, many })
   sessions: many(tenantEndUserSessions),
   // DEL-24: commerce.
   carts: many(carts),
-  orders: many(orders),
+  orderIntents: many(orderIntents),
 }));
 
 export const tenantMembershipsRelations = relations(tenantMemberships, ({ one }) => ({
@@ -1387,33 +1515,74 @@ export const cartItemsRelations = relations(cartItems, ({ one }) => ({
   }),
 }));
 
-export const ordersRelations = relations(orders, ({ one, many }) => ({
+export const orderIntentsRelations = relations(orderIntents, ({ one, many }) => ({
   tenant: one(tenants, {
-    fields: [orders.tenantId],
+    fields: [orderIntents.tenantId],
     references: [tenants.id],
   }),
   location: one(locations, {
-    fields: [orders.locationId],
+    fields: [orderIntents.locationId],
     references: [locations.id],
   }),
-  // tenantEndUser is nullable — orders.tenant_end_user_id SET NULL on
+  // tenantEndUser is nullable — order_intents.tenant_end_user_id SET NULL on
   // single-user GDPR delete; relation typed accordingly.
   tenantEndUser: one(tenantEndUsers, {
-    fields: [orders.tenantEndUserId],
+    fields: [orderIntents.tenantEndUserId],
     references: [tenantEndUsers.id],
   }),
-  lineItems: many(orderLineItems),
+  items: many(orderIntentItems),
+  fulfillments: many(orderFulfillments),
+  modifications: many(orderModifications),
 }));
 
-export const orderLineItemsRelations = relations(orderLineItems, ({ one }) => ({
-  order: one(orders, {
-    fields: [orderLineItems.orderId],
-    references: [orders.id],
+export const orderIntentItemsRelations = relations(orderIntentItems, ({ one, many }) => ({
+  orderIntent: one(orderIntents, {
+    fields: [orderIntentItems.orderIntentId],
+    references: [orderIntents.id],
   }),
-  // brand is nullable — order_line_items.brand_id SET NULL on single-brand
-  // hard-delete (history preserved via brand_name_snapshot).
+  // brand is nullable — SET NULL on single-brand hard-delete (history
+  // preserved via brand_name_snapshot).
   brand: one(brands, {
-    fields: [orderLineItems.brandId],
+    fields: [orderIntentItems.brandId],
     references: [brands.id],
+  }),
+  fulfillmentItems: many(orderFulfillmentItems),
+}));
+
+export const orderFulfillmentsRelations = relations(orderFulfillments, ({ one, many }) => ({
+  orderIntent: one(orderIntents, {
+    fields: [orderFulfillments.orderIntentId],
+    references: [orderIntents.id],
+  }),
+  tenant: one(tenants, {
+    fields: [orderFulfillments.tenantId],
+    references: [tenants.id],
+  }),
+  brand: one(brands, {
+    fields: [orderFulfillments.brandId],
+    references: [brands.id],
+  }),
+  location: one(locations, {
+    fields: [orderFulfillments.locationId],
+    references: [locations.id],
+  }),
+  items: many(orderFulfillmentItems),
+}));
+
+export const orderFulfillmentItemsRelations = relations(orderFulfillmentItems, ({ one }) => ({
+  fulfillment: one(orderFulfillments, {
+    fields: [orderFulfillmentItems.orderFulfillmentId],
+    references: [orderFulfillments.id],
+  }),
+  intentItem: one(orderIntentItems, {
+    fields: [orderFulfillmentItems.orderIntentItemId],
+    references: [orderIntentItems.id],
+  }),
+}));
+
+export const orderModificationsRelations = relations(orderModifications, ({ one }) => ({
+  orderIntent: one(orderIntents, {
+    fields: [orderModifications.orderIntentId],
+    references: [orderIntents.id],
   }),
 }));

@@ -12,8 +12,8 @@ import type {
   domainEvent,
   guestSignedIn,
   guestSignedUp,
-  orderCancelled,
-  orderPlaced,
+  orderIntentCancelled,
+  orderIntentPlaced,
 } from './schema';
 
 export type { DomainEvent, EventName, EventMeta } from './schema';
@@ -22,15 +22,15 @@ export type { DomainEvent, EventName, EventMeta } from './schema';
 export type GuestSignedUp = z.infer<typeof guestSignedUp>;
 export type GuestSignedIn = z.infer<typeof guestSignedIn>;
 export type CartItemAdded = z.infer<typeof cartItemAdded>;
-export type OrderPlaced = z.infer<typeof orderPlaced>;
-export type OrderCancelled = z.infer<typeof orderCancelled>;
+export type OrderIntentPlaced = z.infer<typeof orderIntentPlaced>;
+export type OrderIntentCancelled = z.infer<typeof orderIntentCancelled>;
 
 // Per-event data-only types — the payload shape stamped into event_outbox.payload.
 export type GuestSignedUpData = GuestSignedUp['data'];
 export type GuestSignedInData = GuestSignedIn['data'];
 export type CartItemAddedData = CartItemAdded['data'];
-export type OrderPlacedData = OrderPlaced['data'];
-export type OrderCancelledData = OrderCancelled['data'];
+export type OrderIntentPlacedData = OrderIntentPlaced['data'];
+export type OrderIntentCancelledData = OrderIntentCancelled['data'];
 
 /**
  * Map of event name → data type. Useful for consumer-side narrowing:
@@ -41,8 +41,8 @@ export type EventDataMap = {
   'guest.signed_up': GuestSignedUpData;
   'guest.signed_in': GuestSignedInData;
   'cart.item_added': CartItemAddedData;
-  'order.placed': OrderPlacedData;
-  'order.cancelled': OrderCancelledData;
+  'order_intent.placed': OrderIntentPlacedData;
+  'order_intent.cancelled': OrderIntentCancelledData;
 };
 
 // Compile-time exhaustiveness guard — if a new event is added to the

@@ -7,7 +7,8 @@
     ".": "./src/index.ts",
     "./schema": "./src/schema.ts",
     "./client": "./src/client.ts",
-    "./modifier-snapshot": "./src/modifier-snapshot.ts"
+    "./modifier-snapshot": "./src/modifier-snapshot.ts",
+    "./fulfillment-status": "./src/fulfillment-status.ts"
   },
   "scripts": {
     "generate": "drizzle-kit generate",

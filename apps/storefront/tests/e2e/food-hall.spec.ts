@@ -6,8 +6,9 @@ import {
   carts,
   menuItems,
   menus,
-  orderLineItems,
-  orders,
+  orderFulfillments,
+  orderIntentItems,
+  orderIntents,
   tenantEndUsers,
   tenants,
 } from '@rp/db/schema';
@@ -102,11 +103,11 @@ test.describe.serial(
     });
 
     test.afterAll(async () => {
-      // Order cleanup BEFORE user cleanup — once user is deleted,
-      // orders.tenant_end_user_id is SET NULL and the row is no longer
-      // findable by user id. Guards on undefined ids in case setup or
-      // a test step failed mid-flow.
-      if (orderId) await db.delete(orders).where(eq(orders.id, orderId));
+      // Intent cleanup BEFORE user cleanup — once the user is deleted,
+      // order_intents.tenant_end_user_id is SET NULL and the row is no longer
+      // findable by user id. Cascades to items/fulfillments. Guards on
+      // undefined ids in case setup or a test step failed mid-flow.
+      if (orderId) await db.delete(orderIntents).where(eq(orderIntents.id, orderId));
       if (userId)
         await db.delete(tenantEndUsers).where(eq(tenantEndUsers.id, userId));
     });
@@ -235,30 +236,30 @@ test.describe.serial(
         page.getByRole('heading', { name: 'OOMI Pizza', exact: true }),
       ).toBeVisible();
 
-      // === 11. DB assertion: one orders row, two order_line_items with
-      // distinct brand_ids matching seeded OOMI brand UUIDs, snapshots
-      // non-empty. ===
-      const [order] = await db
+      // === 11. DB assertion (DEL-32 / X1): one order_intents row (status
+      // 'placed'), two order_intent_items with distinct brand_ids matching the
+      // seeded OOMI brands, and ONE order_fulfillments per brand (2 total). ===
+      const [intent] = await db
         .select()
-        .from(orders)
-        .where(eq(orders.id, capturedOrderId))
+        .from(orderIntents)
+        .where(eq(orderIntents.id, capturedOrderId))
         .limit(1);
-      if (!order) throw new Error('order row not found after checkout');
-      expect(order.tenantId).toBe(oomiTenantId);
-      expect(order.tenantEndUserId).toBe(userId);
-      expect(order.status).toBe('confirmed');
-      expect(order.fulfillmentType).toBe('pickup');
+      if (!intent) throw new Error('order_intents row not found after checkout');
+      expect(intent.tenantId).toBe(oomiTenantId);
+      expect(intent.tenantEndUserId).toBe(userId);
+      expect(intent.status).toBe('placed');
+      expect(intent.placedByActorType).toBe('tenant_end_user');
 
       const lineRows = await db
         .select({
-          id: orderLineItems.id,
-          brandId: orderLineItems.brandId,
-          brandNameSnapshot: orderLineItems.brandNameSnapshot,
-          nameSnapshot: orderLineItems.nameSnapshot,
+          id: orderIntentItems.id,
+          brandId: orderIntentItems.brandId,
+          brandNameSnapshot: orderIntentItems.brandNameSnapshot,
+          nameSnapshot: orderIntentItems.nameSnapshot,
         })
-        .from(orderLineItems)
-        .where(eq(orderLineItems.orderId, capturedOrderId))
-        .orderBy(asc(orderLineItems.brandNameSnapshot));
+        .from(orderIntentItems)
+        .where(eq(orderIntentItems.orderIntentId, capturedOrderId))
+        .orderBy(asc(orderIntentItems.brandNameSnapshot));
       expect(lineRows).toHaveLength(2);
       const brandIds = new Set(lineRows.map((r) => r.brandId));
       expect(brandIds.size).toBe(2);
@@ -267,6 +268,27 @@ test.describe.serial(
       for (const line of lineRows) {
         expect(line.brandNameSnapshot.length).toBeGreaterThan(0);
         expect(line.nameSnapshot.length).toBeGreaterThan(0);
+      }
+
+      // One fulfillment per brand (the KDS ticket), each born 'queued'.
+      const fulfillmentRows = await db
+        .select({
+          brandId: orderFulfillments.brandId,
+          status: orderFulfillments.status,
+          fulfillmentType: orderFulfillments.fulfillmentType,
+          tenantId: orderFulfillments.tenantId,
+        })
+        .from(orderFulfillments)
+        .where(eq(orderFulfillments.orderIntentId, capturedOrderId))
+        .orderBy(asc(orderFulfillments.brandNameSnapshot));
+      expect(fulfillmentRows).toHaveLength(2);
+      const fBrandIds = new Set(fulfillmentRows.map((r) => r.brandId));
+      expect(fBrandIds.has(oomiBurgerId)).toBe(true);
+      expect(fBrandIds.has(oomiPizzaId)).toBe(true);
+      for (const f of fulfillmentRows) {
+        expect(f.status).toBe('queued');
+        expect(f.fulfillmentType).toBe('pickup');
+        expect(f.tenantId).toBe(oomiTenantId);
       }
 
       // Cart row converted (not 'active' anymore).

@@ -5,7 +5,7 @@
  * Per ADR-0009 §5: single registration point across the workspace.
  *
  * Future consumers (welcome-email on guest.signed_up, loyalty-accrue on
- * order.placed, etc.) live under ./consumers/ and are appended here.
+ * order_intent.placed, etc.) live under ./consumers/ and are appended here.
  */
 
 import type { InngestFunction } from 'inngest';

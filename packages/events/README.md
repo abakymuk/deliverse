@@ -15,10 +15,10 @@ Domain event substrate: Zod schemas for every event the platform emits, a transa
 | `guest.signed_up` | `packages/auth-core/src/storefront-adapter.ts` (`user.create` → `queueAfterTransactionHook`) | `guest` |
 | `guest.signed_in` | `packages/auth-core/src/storefront-adapter.ts` (`session.create` → `queueAfterTransactionHook`) | `guest` |
 | `cart.item_added` | `apps/storefront/src/app/(shop)/cart/actions.ts` (`addToCartAction`, in-tx) | `cart` |
-| `order.placed` | `apps/storefront/src/app/(shop)/checkout/actions.ts` (`placeOrderAction`, in-tx) | `order` |
-| `order.cancelled` | _schema-only stub_ — no emission site yet (the cancel flow doesn't exist) | `order` |
+| `order_intent.placed` | `apps/storefront/src/app/(shop)/checkout/actions.ts` (`placeOrderAction`, in-tx) | `order_intent` |
+| `order_intent.cancelled` | _schema-only stub_ — no emission site yet (the cancel flow doesn't exist) | `order_intent` |
 
-`order.*` event names get renamed to `order_intent.*` when DEL-32 / X1 (Order Intent split) lands.
+The order events were renamed `order.*` → `order_intent.*` in DEL-32 / X1 (Order Intent split) — a clean hard-rename (no dual-emit; there were zero live consumers).
 
 ## Versioning rules
 
@@ -28,7 +28,7 @@ Domain event substrate: Zod schemas for every event the platform emits, a transa
 
 ## Naming convention
 
-Dot-notation: `<aggregate>.<action>` (`guest.signed_up`, `order.placed`). Matches the `@rp/emails` event convention. No abbreviations.
+Dot-notation: `<aggregate>.<action>` (`guest.signed_up`, `order_intent.placed`). Matches the `@rp/emails` event convention. No abbreviations.
 
 ## Writer pattern (in-tx)
 
@@ -91,8 +91,8 @@ Each event type derives an `idempotency_key` (or `null` for events where multipl
 | `guest.signed_up` | `userId` |
 | `guest.signed_in` | `sessionId` |
 | `cart.item_added` | `null` (distinct adds are distinct events) |
-| `order.placed` | `orderId` |
-| `order.cancelled` | `${orderId}:cancelled` |
+| `order_intent.placed` | `orderIntentId` |
+| `order_intent.cancelled` | `${orderIntentId}:cancelled` |
 
 ## Dispatcher
 

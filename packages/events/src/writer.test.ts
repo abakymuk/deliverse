@@ -205,16 +205,15 @@ describe('domainEvent — Zod validation', () => {
     });
   });
 
-  describe('order.placed', () => {
+  describe('order_intent.placed', () => {
     it('accepts a well-formed multi-brand payload', () => {
       const event: DomainEvent = {
-        name: 'order.placed',
+        name: 'order_intent.placed',
         data: {
           ...baseFields(),
-          orderId: ORDER_ID,
+          orderIntentId: ORDER_ID,
           cartId: CART_ID,
           locationId: LOCATION_ID,
-          fulfillmentType: 'pickup',
           totalCents: 4500,
           subtotalCents: 4500,
           brandIds: [BRAND_ID, randomUUID()],
@@ -228,13 +227,12 @@ describe('domainEvent — Zod validation', () => {
       // brandIds is an array; v1 doesn't enforce non-empty. Consumer logic
       // decides what to do if empty.
       const event: DomainEvent = {
-        name: 'order.placed',
+        name: 'order_intent.placed',
         data: {
           ...baseFields(),
-          orderId: ORDER_ID,
+          orderIntentId: ORDER_ID,
           cartId: null,
           locationId: LOCATION_ID,
-          fulfillmentType: 'delivery',
           totalCents: 0,
           subtotalCents: 0,
           brandIds: [],
@@ -244,15 +242,15 @@ describe('domainEvent — Zod validation', () => {
       expect(() => domainEvent.parse(event)).not.toThrow();
     });
 
-    it('rejects invalid fulfillmentType', () => {
+    it('rejects a missing orderIntentId', () => {
+      // fulfillmentType is intentionally NOT on the intent event (DEL-32):
+      // fulfillment is per-brand on order_fulfillments. Guard a required field.
       const event = {
-        name: 'order.placed',
+        name: 'order_intent.placed',
         data: {
           ...baseFields(),
-          orderId: ORDER_ID,
           cartId: CART_ID,
           locationId: LOCATION_ID,
-          fulfillmentType: 'dine_in', // not in v1 enum
           totalCents: 1299,
           subtotalCents: 1299,
           brandIds: [BRAND_ID],
@@ -263,13 +261,13 @@ describe('domainEvent — Zod validation', () => {
     });
   });
 
-  describe('order.cancelled (stub)', () => {
+  describe('order_intent.cancelled (stub)', () => {
     it('accepts a well-formed payload with reason', () => {
       const event: DomainEvent = {
-        name: 'order.cancelled',
+        name: 'order_intent.cancelled',
         data: {
           ...baseFields(),
-          orderId: ORDER_ID,
+          orderIntentId: ORDER_ID,
           reason: 'guest requested',
         },
       };
@@ -278,10 +276,10 @@ describe('domainEvent — Zod validation', () => {
 
     it('accepts null reason', () => {
       const event: DomainEvent = {
-        name: 'order.cancelled',
+        name: 'order_intent.cancelled',
         data: {
           ...baseFields(),
-          orderId: ORDER_ID,
+          orderIntentId: ORDER_ID,
           reason: null,
         },
       };
@@ -292,13 +290,13 @@ describe('domainEvent — Zod validation', () => {
   describe('actorType', () => {
     it('accepts system actor with null actorId', () => {
       const event: DomainEvent = {
-        name: 'order.cancelled',
+        name: 'order_intent.cancelled',
         data: {
           tenantId: TENANT_ID,
           occurredAt: new Date().toISOString(),
           actorType: 'system',
           actorId: null,
-          orderId: ORDER_ID,
+          orderIntentId: ORDER_ID,
           reason: 'auto-cancelled after timeout',
         },
       };
@@ -307,13 +305,13 @@ describe('domainEvent — Zod validation', () => {
 
     it('rejects unknown actorType', () => {
       const event = {
-        name: 'order.cancelled',
+        name: 'order_intent.cancelled',
         data: {
           tenantId: TENANT_ID,
           occurredAt: new Date().toISOString(),
           actorType: 'admin', // not in enum
           actorId: USER_ID,
-          orderId: ORDER_ID,
+          orderIntentId: ORDER_ID,
           reason: null,
         },
       };
