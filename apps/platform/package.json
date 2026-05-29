@@ -17,6 +17,7 @@
     "@rp/db": "workspace:*",
     "@rp/emails": "workspace:*",
     "@rp/events": "workspace:*",
+    "@rp/payments": "workspace:*",
     "@rp/ui": "workspace:*",
     "better-auth": "^1.4.0",
     "inngest": "^4.4.0",
