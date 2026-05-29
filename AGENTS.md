@@ -10,7 +10,14 @@
 
 **Status:** Greenfield, solo development with Claude Code.
 
-**Core differentiator:** Agent-first restaurant operations. Auth, infrastructure, and standard SaaS plumbing are **boring tech** — they should be invisible. The product moat lives in restaurant operations workflows we build on top.
+**Core differentiator (building toward):** Agent-first restaurant operations is the differentiator we are *building toward* — not a capability we claim today. New operational modules should expose domain contracts/events where practical. Auth, infrastructure, and standard SaaS plumbing are **boring tech** — they should be invisible. The product moat will live in the restaurant-operations workflows we build on top.
+
+**Substrate behind the claim (with status):**
+
+- **N2 — event outbox · SHIPPED (DEL-29):** `event_outbox` table + `@rp/events` package — Zod-validated domain events written transactionally via `appendEvent(tx, …)`.
+- **X1 — Order Intent / Fulfillment split · PLANNED (DEL-32).**
+- **L2 — `@rp/domain` + `@rp/contracts` · PLANNED (DEL-39).**
+- **L3 — JSON API + MCP server · PLANNED (DEL-40).**
 
 ---
 
@@ -27,7 +34,7 @@
 | Database | Postgres (Neon) | Serverless, branches for previews |
 | ORM | Drizzle | TypeScript-native, edge-compatible |
 | Auth | Better-Auth | Multi-tenant, self-host, modern |
-| Async/Jobs | Inngest | Event-driven, agent-friendly |
+| Async/Jobs | Inngest | Task queue / side-effect fan-out (domain-event substrate is `event_outbox` + `@rp/events`, not Inngest) |
 | Email | Resend | Simple, deliverability, React templates |
 | Analytics | PostHog | Product + flags + session replay |
 | Errors | Sentry | Standard, debuggable |
@@ -93,6 +100,22 @@ Tenant (business entity)
 ```
 
 End user identity scoped to tenant. Brand provides UX context only (theme, subdomain, email branding).
+
+---
+
+## Module Boundaries (how new modules attach)
+
+A **new module** attaches via **three surfaces only**:
+
+1. Subscribing to events from `@rp/events`.
+2. Reading projections it owns.
+3. Calling versioned RPCs (when introduced via `@rp/contracts`).
+
+A new module **MUST NOT** add columns to core tables, and **MUST NOT** import core domain schema directly from `@rp/db`.
+
+> **Scope:** this governs *new attached modules*. The existing two apps' sanctioned, direct use of `@rp/db` / `@rp/db/schema` (e.g. commerce/checkout server actions) is unaffected.
+>
+> **Value-type kernels are allowed.** The prohibition targets core *table/domain* schema (`@rp/db/schema`, the Drizzle tables, the client). It does **not** forbid client-free shared value types published as dedicated subpaths — e.g. `@rp/db/modifier-snapshot` (a Zod schema + type, no table/client import), which `@rp/events` itself consumes. Those are shared contract surface, not core internals.
 
 ---
 
@@ -300,5 +323,5 @@ The first one gives me context, references, and asks for a plan. The second forc
 ## Maintainer
 
 - Owner: Vlad
-- Last AGENTS.md review: <date>
+- Last AGENTS.md review: 2026-05-28
 - Next review: weekly during active development
