@@ -150,6 +150,42 @@ export const orderIntentCancelled = z.object({
   }),
 });
 
+// ── payment.captured ────────────────────────────────────────────────────────
+//
+// DEL-35 / X4. Emitted by the Stripe webhook handler when a PaymentIntent
+// succeeds (Express + destination charge). externalId is the PaymentIntent id
+// (pi_…) — it's the outbox idempotency_key, so a redelivered webhook can't
+// double-publish.
+
+export const paymentCaptured = z.object({
+  name: z.literal('payment.captured'),
+  data: baseEvent.extend({
+    paymentId: z.string().uuid(),
+    orderIntentId: z.string().uuid(),
+    externalId: z.string(),
+    amountCents: z.number().int().nonnegative(),
+    currency: z.string(),
+  }),
+});
+
+// ── payment.refunded ──────────────────────────────────────────────────────────
+//
+// DEL-35 / X4. Emitted per refund by the charge.refunded webhook handler.
+// externalId is the Refund id (re_…) — one event per refund (partial refunds
+// produce several). orderModificationId links the ledger row written alongside
+// the refund; nullable because the link is best-effort.
+
+export const paymentRefunded = z.object({
+  name: z.literal('payment.refunded'),
+  data: baseEvent.extend({
+    paymentId: z.string().uuid(),
+    refundId: z.string().uuid(),
+    externalId: z.string(),
+    amountCents: z.number().int().nonnegative(),
+    orderModificationId: z.string().uuid().nullable(),
+  }),
+});
+
 // ── Union of all domain events ────────────────────────────────────────────
 
 export const domainEvent = z.discriminatedUnion('name', [
@@ -158,6 +194,8 @@ export const domainEvent = z.discriminatedUnion('name', [
   cartItemAdded,
   orderIntentPlaced,
   orderIntentCancelled,
+  paymentCaptured,
+  paymentRefunded,
 ]);
 
 export type DomainEvent = z.infer<typeof domainEvent>;

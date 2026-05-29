@@ -145,6 +145,25 @@ export const fulfillmentTypeEnum = pgEnum('fulfillment_type', [
   'dine_in',
 ]);
 
+// Payment + refund lifecycle (DEL-35 / X4). Provider-agnostic (Stripe is the
+// only provider at launch). partially_refunded/refunded are driven by the
+// refund webhook reconciling sum(refunds.amount_cents) vs payments.amount_cents.
+export const paymentStatusEnum = pgEnum('payment_status', [
+  'pending',
+  'captured',
+  'partially_refunded',
+  'refunded',
+  'failed',
+  'canceled',
+]);
+
+export const refundStatusEnum = pgEnum('refund_status', [
+  'pending',
+  'succeeded',
+  'failed',
+  'canceled',
+]);
+
 // ============================================================================
 // PLATFORM IDENTITY (apps/platform)
 // ============================================================================
@@ -374,6 +393,13 @@ export const tenants = pgTable('tenants', {
   // Flexible metadata — BA expects "metadata" field.
   // We use jsonb for query-ability (vs json which is plain text in postgres).
   metadata: jsonb('metadata').$type<Record<string, unknown>>(),
+
+  // Stripe Connect (DEL-35 / X4). account_id is set when onboarding STARTS so
+  // re-clicks reuse the same Express account (no duplicates); charges_enabled
+  // is flipped by the account.updated webhook once Stripe verifies the account.
+  // The future charge path gates on charges_enabled, NOT on account_id presence.
+  stripeAccountId: text('stripe_account_id'),
+  stripeChargesEnabled: boolean('stripe_charges_enabled').notNull().default(false),
 
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1332,6 +1358,104 @@ export const orderModifications = pgTable('order_modifications', {
 }));
 
 // ============================================================================
+// PAYMENTS (DEL-35 / X4)
+// ============================================================================
+//
+// Money movement via a payment provider (Stripe: Express accounts + destination
+// charges). Stamped idempotently by the Stripe webhook — UNIQUE (provider,
+// external_id) + ON CONFLICT DO NOTHING absorbs webhook redelivery, and the
+// payment.captured / payment.refunded outbox events are emitted ONLY on a
+// genuinely new row. tenant_id is the direct scoping column (RLS-ready) and
+// keeps tenant GDPR cascade working.
+
+/**
+ * payments — a captured charge for an order intent. external_id is the Stripe
+ * PaymentIntent id (pi_…); amount_cents is amount_received (the captured
+ * amount). application_fee_cents is the platform's Connect cut — nullable
+ * because reading it reliably may need a latest_charge expansion.
+ */
+export const payments = pgTable('payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  orderIntentId: uuid('order_intent_id')
+    .notNull()
+    .references(() => orderIntents.id, { onDelete: 'cascade' }),
+
+  // Provider-agnostic; 'stripe' is the only value at launch.
+  provider: text('provider').notNull().default('stripe'),
+  // Stripe PaymentIntent id (pi_…) — the stable per-payment dedup handle.
+  externalId: text('external_id').notNull(),
+
+  amountCents: integer('amount_cents').notNull(),
+  currency: text('currency').notNull().default('usd'),
+  // Platform cut (Connect application_fee_amount). Nullable — see above.
+  applicationFeeCents: integer('application_fee_cents'),
+
+  status: paymentStatusEnum('status').notNull(),
+
+  capturedAt: timestamp('captured_at', { withTimezone: true }),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  // Row-level webhook idempotency — one payment row per provider object.
+  providerExternalUnique: uniqueIndex('payments_provider_external_id_unique')
+    .on(t.provider, t.externalId),
+  tenantCreatedAtIdx: index('payments_tenant_created_at_idx').on(t.tenantId, t.createdAt.desc()),
+  orderIntentIdx: index('payments_order_intent_idx').on(t.orderIntentId),
+}));
+
+/**
+ * refunds — money returned against a payment (one payment has N refunds for
+ * partial refunds). Stamped by the charge.refunded webhook with the same
+ * idempotency shape as payments. Full-unwind economics: reverse_transfer claws
+ * back the restaurant's transferred share (transfer_reversed) and
+ * refund_application_fee returns the platform cut (application_fee_refunded_cents)
+ * — both recorded here for reconciliation. Each new refund also writes an
+ * order_modifications(kind='refund') ledger row, linked via order_modification_id.
+ */
+export const refunds = pgTable('refunds', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  tenantId: uuid('tenant_id')
+    .notNull()
+    .references(() => tenants.id, { onDelete: 'cascade' }),
+
+  paymentId: uuid('payment_id')
+    .notNull()
+    .references(() => payments.id, { onDelete: 'cascade' }),
+
+  // Optional link to the append-only ledger entry. SET NULL — the refund
+  // record (money moved) outlives a modification-row cleanup.
+  orderModificationId: uuid('order_modification_id')
+    .references(() => orderModifications.id, { onDelete: 'set null' }),
+
+  provider: text('provider').notNull().default('stripe'),
+  // Stripe Refund id (re_…).
+  externalId: text('external_id').notNull(),
+
+  amountCents: integer('amount_cents').notNull(),
+  status: refundStatusEnum('status').notNull(),
+
+  // Full-unwind reconciliation: did we reverse the destination transfer, and
+  // how much application fee did we return.
+  transferReversed: boolean('transfer_reversed').notNull().default(false),
+  applicationFeeRefundedCents: integer('application_fee_refunded_cents'),
+
+  processedAt: timestamp('processed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+}, (t) => ({
+  providerExternalUnique: uniqueIndex('refunds_provider_external_id_unique')
+    .on(t.provider, t.externalId),
+  paymentIdx: index('refunds_payment_idx').on(t.paymentId),
+  tenantCreatedAtIdx: index('refunds_tenant_created_at_idx').on(t.tenantId, t.createdAt.desc()),
+}));
+
+// ============================================================================
 // EVENT OUTBOX (DEL-29 / N2)
 // ============================================================================
 //
@@ -1490,6 +1614,13 @@ export type NewOrderFulfillmentItem = typeof orderFulfillmentItems.$inferInsert;
 export type OrderModification = typeof orderModifications.$inferSelect;
 export type NewOrderModification = typeof orderModifications.$inferInsert;
 
+// DEL-35: payments + refunds
+export type Payment = typeof payments.$inferSelect;
+export type NewPayment = typeof payments.$inferInsert;
+
+export type Refund = typeof refunds.$inferSelect;
+export type NewRefund = typeof refunds.$inferInsert;
+
 // DEL-29: event outbox
 export type EventOutbox = typeof eventOutbox.$inferSelect;
 export type NewEventOutbox = typeof eventOutbox.$inferInsert;
@@ -1514,6 +1645,9 @@ export const tenantsRelations = relations(tenants, ({ many }) => ({
   carts: many(carts),
   orderIntents: many(orderIntents),
   orderFulfillments: many(orderFulfillments),
+  // DEL-35: payments.
+  payments: many(payments),
+  refunds: many(refunds),
 }));
 
 export const brandsRelations = relations(brands, ({ one, many }) => ({
@@ -1706,6 +1840,7 @@ export const orderIntentsRelations = relations(orderIntents, ({ one, many }) => 
   items: many(orderIntentItems),
   fulfillments: many(orderFulfillments),
   modifications: many(orderModifications),
+  payments: many(payments),
 }));
 
 export const orderIntentItemsRelations = relations(orderIntentItems, ({ one, many }) => ({
@@ -1753,9 +1888,40 @@ export const orderFulfillmentItemsRelations = relations(orderFulfillmentItems, (
   }),
 }));
 
-export const orderModificationsRelations = relations(orderModifications, ({ one }) => ({
+export const orderModificationsRelations = relations(orderModifications, ({ one, many }) => ({
   orderIntent: one(orderIntents, {
     fields: [orderModifications.orderIntentId],
     references: [orderIntents.id],
+  }),
+  // DEL-35: each refund writes its own modification row; the nullable FK lives
+  // on refunds, so physically this is one-to-many.
+  refunds: many(refunds),
+}));
+
+export const paymentsRelations = relations(payments, ({ one, many }) => ({
+  tenant: one(tenants, {
+    fields: [payments.tenantId],
+    references: [tenants.id],
+  }),
+  orderIntent: one(orderIntents, {
+    fields: [payments.orderIntentId],
+    references: [orderIntents.id],
+  }),
+  refunds: many(refunds),
+}));
+
+export const refundsRelations = relations(refunds, ({ one }) => ({
+  tenant: one(tenants, {
+    fields: [refunds.tenantId],
+    references: [tenants.id],
+  }),
+  payment: one(payments, {
+    fields: [refunds.paymentId],
+    references: [payments.id],
+  }),
+  // Nullable — SET NULL on modification cleanup.
+  orderModification: one(orderModifications, {
+    fields: [refunds.orderModificationId],
+    references: [orderModifications.id],
   }),
 }));

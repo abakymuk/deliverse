@@ -17,6 +17,8 @@ export {
   guestSignedUp,
   orderIntentCancelled,
   orderIntentPlaced,
+  paymentCaptured,
+  paymentRefunded,
 } from './schema';
 
 export type { DomainEvent, EventMeta, EventName } from './schema';
@@ -33,6 +35,10 @@ export type {
   OrderIntentCancelledData,
   OrderIntentPlaced,
   OrderIntentPlacedData,
+  PaymentCaptured,
+  PaymentCapturedData,
+  PaymentRefunded,
+  PaymentRefundedData,
 } from './types';
 
 export { appendEvent, appendEventAfterCommit } from './writer';
