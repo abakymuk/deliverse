@@ -16,6 +16,7 @@ export { createAccountLink, createOrReuseConnectAccount } from './onboarding';
 export {
   dispatchStripeEvent,
   handleAccountUpdated,
+  handleChargeRefunded,
   handlePaymentIntentSucceeded,
   HANDLED_STRIPE_EVENT_TYPES,
 } from './handlers';
