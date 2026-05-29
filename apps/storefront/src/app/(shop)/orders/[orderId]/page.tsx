@@ -1,11 +1,12 @@
 import { db } from '@rp/db';
-import { orderIntents } from '@rp/db/schema';
-import { eq } from 'drizzle-orm';
+import { orderIntents, payments, tenants } from '@rp/db/schema';
+import { desc, eq } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { auth } from '@/lib/auth';
 import { OrderSummary } from '@/components/orders/order-summary';
+import { PayPanel } from './pay-panel';
 
 type Params = { orderId: string };
 
@@ -61,6 +62,23 @@ export default async function OrderDetailPage({
   if (!orderIntent) notFound();
   if (orderIntent.tenantEndUserId !== session.user.id) notFound();
 
+  // Latest payment for this order (if any) + whether the tenant can take charges.
+  const [latestPayment] = await db
+    .select({ status: payments.status })
+    .from(payments)
+    .where(eq(payments.orderIntentId, orderIntent.id))
+    .orderBy(desc(payments.createdAt))
+    .limit(1);
+  const [tenant] = await db
+    .select({ chargesEnabled: tenants.stripeChargesEnabled })
+    .from(tenants)
+    .where(eq(tenants.id, orderIntent.tenantId))
+    .limit(1);
+
+  const isPaid =
+    latestPayment?.status === 'captured' || latestPayment?.status === 'partially_refunded';
+  const isRefunded = latestPayment?.status === 'refunded';
+
   return (
     <div className="container mx-auto p-8">
       <div className="mb-6">
@@ -77,6 +95,27 @@ export default async function OrderDetailPage({
       </p>
       <div className="mt-8">
         <OrderSummary orderIntent={orderIntent} />
+      </div>
+
+      <div className="mt-8">
+        <h2 className="text-lg font-semibold">Payment</h2>
+        {isPaid ? (
+          <p className="mt-2 text-sm text-green-700">Paid — thank you!</p>
+        ) : isRefunded ? (
+          <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">Refunded.</p>
+        ) : orderIntent.status !== 'placed' ? (
+          <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
+            This order is {orderIntent.status}.
+          </p>
+        ) : tenant?.chargesEnabled ? (
+          <div className="mt-3">
+            <PayPanel orderId={orderIntent.id} />
+          </div>
+        ) : (
+          <p className="mt-2 text-sm text-[var(--color-muted-foreground)]">
+            Online payment is not available for this restaurant yet.
+          </p>
+        )}
       </div>
     </div>
   );
