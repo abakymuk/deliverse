@@ -1,6 +1,7 @@
 'use server';
 
 import { createAccountLink, createOrReuseConnectAccount } from '@rp/payments';
+import type { Route } from 'next';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { auth } from '@/lib/auth';
@@ -28,6 +29,7 @@ export async function startStripeOnboardingAction(tenantId: string): Promise<voi
 
   // redirect() throws NEXT_REDIRECT and must not sit inside a try/catch that
   // would swallow it. No db transaction is open here, so nothing to roll back.
-  // The target is Stripe's hosted onboarding (an absolute external URL).
-  redirect(url);
+  // The target is Stripe's hosted onboarding — an absolute EXTERNAL URL, so we
+  // cast past the typedRoutes guard (which only knows internal app routes).
+  redirect(url as Route);
 }
