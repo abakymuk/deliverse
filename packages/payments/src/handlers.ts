@@ -6,14 +6,14 @@
  * (no outbound API calls in the webhook path — everything needed is on the
  * event payload), which keeps the Stripe SDK out of the DB-backed handler tests.
  *
- * account.updated (onboarding) + payment_intent.succeeded (capture) are wired;
- * refund (charge.refunded) lands in step 4.
+ * account.updated (onboarding), payment_intent.succeeded (capture), and
+ * charge.refunded (refund, full unwind) are all wired.
  */
 
 import type { Transaction } from '@rp/db';
-import { payments, tenants } from '@rp/db/schema';
+import { orderModifications, payments, refunds, tenants } from '@rp/db/schema';
 import { appendEvent } from '@rp/events/writer';
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type Stripe from 'stripe';
 import { z } from 'zod';
 import { PermanentWebhookError } from './errors';
@@ -129,6 +129,149 @@ export async function handlePaymentIntentSucceeded(
   });
 }
 
+/** Map Stripe's refund status onto our refund_status enum. */
+function mapRefundStatus(
+  status: Stripe.Refund['status'],
+): 'pending' | 'succeeded' | 'failed' | 'canceled' {
+  switch (status) {
+    case 'succeeded':
+      return 'succeeded';
+    case 'failed':
+      return 'failed';
+    case 'canceled':
+      return 'canceled';
+    default:
+      // 'pending', 'requires_action', or null
+      return 'pending';
+  }
+}
+
+/**
+ * charge.refunded → refunds row(s) + order_modifications ledger + payment.refunded.
+ *
+ * Resolves the payment via charge.payment_intent (= payments.external_id). For
+ * each Stripe refund on the charge, idempotently upserts a refunds row
+ * (UNIQUE(provider, external_id)); ONLY on a newly-inserted row does it write the
+ * order_modifications(kind='refund') ledger entry, link it back, recompute
+ * payments.status (partially_refunded vs refunded), and emit payment.refunded.
+ *
+ * Full-unwind reconciliation (locked decision): transfer_reversed comes from
+ * refund.transfer_reversal; the application fee is refunded on FULL refunds only,
+ * so application_fee_refunded_cents = the charge fee when the charge is now fully
+ * refunded, else 0. Actor is threaded from refund.metadata.platform_user_id
+ * (the admin who triggered it), else 'system'.
+ *
+ * If no payment is found, the capture (payment_intent.succeeded) likely hasn't
+ * been processed yet — throw so Stripe retries; the ordering race self-heals and
+ * idempotency makes the retry safe.
+ */
+export async function handleChargeRefunded(
+  tx: Transaction,
+  charge: Stripe.Charge,
+): Promise<void> {
+  const paymentIntentId =
+    typeof charge.payment_intent === 'string'
+      ? charge.payment_intent
+      : (charge.payment_intent?.id ?? null);
+
+  if (!paymentIntentId) {
+    throw new PermanentWebhookError(`charge.refunded ${charge.id}: charge has no payment_intent`);
+  }
+
+  const [payment] = await tx
+    .select({
+      id: payments.id,
+      tenantId: payments.tenantId,
+      orderIntentId: payments.orderIntentId,
+      amountCents: payments.amountCents,
+    })
+    .from(payments)
+    .where(and(eq(payments.provider, 'stripe'), eq(payments.externalId, paymentIntentId)))
+    .limit(1);
+
+  if (!payment) {
+    throw new Error(
+      `charge.refunded ${charge.id}: no payment for payment_intent ${paymentIntentId} (capture not processed yet?)`,
+    );
+  }
+
+  const chargeFeeRefundedCents = charge.refunded ? (charge.application_fee_amount ?? null) : 0;
+
+  for (const refund of charge.refunds?.data ?? []) {
+    const [insertedRefund] = await tx
+      .insert(refunds)
+      .values({
+        tenantId: payment.tenantId,
+        paymentId: payment.id,
+        provider: 'stripe',
+        externalId: refund.id,
+        amountCents: refund.amount,
+        status: mapRefundStatus(refund.status),
+        transferReversed: refund.transfer_reversal != null,
+        applicationFeeRefundedCents: chargeFeeRefundedCents,
+        processedAt: new Date(refund.created * 1000),
+      })
+      .onConflictDoNothing({ target: [refunds.provider, refunds.externalId] })
+      .returning({ id: refunds.id });
+
+    // Replay (refund already recorded) → skip ledger/status/event for this one.
+    if (!insertedRefund) continue;
+
+    // Thread the admin who triggered the refund, if present.
+    const platformUserId = z.string().uuid().safeParse(refund.metadata?.platform_user_id);
+    const actorType = platformUserId.success ? 'platform_user' : 'system';
+    const actorId = platformUserId.success ? platformUserId.data : null;
+
+    const [modification] = await tx
+      .insert(orderModifications)
+      .values({
+        orderIntentId: payment.orderIntentId,
+        kind: 'refund',
+        actorType,
+        actorId,
+        payload: { refundExternalId: refund.id, paymentId: payment.id },
+        financialDeltaCents: -refund.amount,
+      })
+      .returning({ id: orderModifications.id });
+
+    const orderModificationId = modification?.id ?? null;
+
+    await tx
+      .update(refunds)
+      .set({ orderModificationId })
+      .where(eq(refunds.id, insertedRefund.id));
+
+    // Recompute payment status from the sum of all its refunds (incl. this one,
+    // visible inside the tx).
+    const refundRows = await tx
+      .select({ amountCents: refunds.amountCents })
+      .from(refunds)
+      .where(eq(refunds.paymentId, payment.id));
+    const totalRefunded = refundRows.reduce((sum, r) => sum + r.amountCents, 0);
+    const nextStatus = totalRefunded >= payment.amountCents ? 'refunded' : 'partially_refunded';
+
+    await tx
+      .update(payments)
+      .set({ status: nextStatus, updatedAt: new Date() })
+      .where(eq(payments.id, payment.id));
+
+    await appendEvent(tx, {
+      name: 'payment.refunded',
+      data: {
+        tenantId: payment.tenantId,
+        occurredAt: new Date(refund.created * 1000).toISOString(),
+        actorType,
+        actorId,
+        paymentId: payment.id,
+        refundId: insertedRefund.id,
+        externalId: refund.id,
+        amountCents: refund.amount,
+        orderModificationId,
+      },
+    });
+  }
+}
+
 /**
  * Route a verified Stripe event to its handler inside the supplied tx.
  * Unhandled event types are a no-op — the route ACKs 200, since we don't want
@@ -144,6 +287,8 @@ export async function dispatchStripeEvent(
       return handleAccountUpdated(tx, event.data.object);
     case 'payment_intent.succeeded':
       return handlePaymentIntentSucceeded(tx, event.data.object);
+    case 'charge.refunded':
+      return handleChargeRefunded(tx, event.data.object);
     default:
       return;
   }
@@ -152,10 +297,10 @@ export async function dispatchStripeEvent(
 /**
  * Event types {@link dispatchStripeEvent} acts on. The webhook route checks this
  * BEFORE opening a db.transaction so Stripe events we ignore are ACKed 200
- * without a DB round-trip. Keep in sync with the switch above — step 4 adds
- * 'charge.refunded'.
+ * without a DB round-trip. Keep in sync with the switch above.
  */
 export const HANDLED_STRIPE_EVENT_TYPES: ReadonlySet<Stripe.Event['type']> = new Set([
   'account.updated',
   'payment_intent.succeeded',
+  'charge.refunded',
 ]);

@@ -10,7 +10,7 @@ import {
 import type { Route } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { startStripeOnboardingAction } from './actions';
+import { refundPaymentAction, startStripeOnboardingAction } from './actions';
 
 /**
  * Tenant detail + Stripe Connect onboarding panel (DEL-35 / X4).
@@ -39,6 +39,13 @@ export default async function TenantDetailPage({
   });
 
   if (!tenant) notFound();
+
+  const tenantPayments = await db.query.payments.findMany({
+    columns: { id: true, externalId: true, amountCents: true, currency: true, status: true },
+    where: (p, { eq }) => eq(p.tenantId, tenant.id),
+    orderBy: (p, { desc }) => desc(p.createdAt),
+    limit: 50,
+  });
 
   const onboard = startStripeOnboardingAction.bind(null, tenant.id);
 
@@ -82,6 +89,57 @@ export default async function TenantDetailPage({
           </form>
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-lg">Payments</CardTitle>
+          <CardDescription>
+            Captured payments for this tenant. Refund issues a full unwind —
+            reverses the transfer to the restaurant and returns the platform fee.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {tenantPayments.length === 0 ? (
+            <p className="text-[var(--color-muted-foreground)] text-sm">No payments yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead className="border-b text-left">
+                <tr>
+                  <th className="py-2 font-medium">Payment</th>
+                  <th className="py-2 font-medium">Amount</th>
+                  <th className="py-2 font-medium">Status</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {tenantPayments.map((p) => (
+                  <tr key={p.id} className="border-b last:border-0">
+                    <td className="py-2 font-mono text-xs">{p.externalId}</td>
+                    <td className="py-2">{formatAmount(p.amountCents, p.currency)}</td>
+                    <td className="py-2">{p.status}</td>
+                    <td className="py-2 text-right">
+                      {(p.status === 'captured' || p.status === 'partially_refunded') && (
+                        <form action={refundPaymentAction.bind(null, tenant.id, p.id)}>
+                          <Button type="submit" variant="outline" size="sm">
+                            Refund
+                          </Button>
+                        </form>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
+}
+
+function formatAmount(cents: number, currency: string): string {
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+  }).format(cents / 100);
 }

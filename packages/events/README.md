@@ -18,7 +18,7 @@ Domain event substrate: Zod schemas for every event the platform emits, a transa
 | `order_intent.placed` | `apps/storefront/src/app/(shop)/checkout/actions.ts` (`placeOrderAction`, in-tx) | `order_intent` |
 | `order_intent.cancelled` | _schema-only stub_ — no emission site yet (the cancel flow doesn't exist) | `order_intent` |
 | `payment.captured` | `packages/payments/src/handlers.ts` (`handlePaymentIntentSucceeded`, in-tx) | `payment` |
-| `payment.refunded` | `packages/payments/src/handlers.ts` (Stripe webhook, in-tx) — _DEL-35 / X4; emission site lands in step 4_ | `payment` |
+| `payment.refunded` | `packages/payments/src/handlers.ts` (`handleChargeRefunded`, in-tx) | `payment` |
 
 The order events were renamed `order.*` → `order_intent.*` in DEL-32 / X1 (Order Intent split) — a clean hard-rename (no dual-emit; there were zero live consumers).
 
