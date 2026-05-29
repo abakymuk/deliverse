@@ -85,6 +85,13 @@
       "when": 1780080000000,
       "tag": "0011_del_32_order_intent_split",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1780090000000,
+      "tag": "0012_burly_miss_america",
+      "breakpoints": true
     }
   ]
 }

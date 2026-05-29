@@ -42,16 +42,20 @@
  */
 
 import { hashPassword } from '@better-auth/utils/password';
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
 import { db } from './client';
 import {
   brands,
   cartItems,
   carts,
+  categories,
   locationBrands,
   locations,
+  menuItemModifierGroups,
   menuItems,
   menus,
+  modifierGroups,
+  modifiers,
   platformAccounts,
   platformUsers,
   storefronts,
@@ -138,6 +142,18 @@ const SOLO_BRAND_NAME = 'Solo Cafe';
 const SOLO_LOCATION_ID = '00000000-0000-4000-8000-000000000080';
 const SOLO_MENU_ID = '00000000-0000-4000-8000-000000000081';
 const SOLO_ITEM_ESPRESSO_ID = '00000000-0000-4000-8000-000000000082';
+
+// DEL-34 / X3: catalog UUIDs (range a0+ — past the 0–93 block above). Per
+// brand: a category + a single-select "Size" modifier group (the 3 size
+// modifiers are inlined in the insert). Join rows use the composite PK.
+const PIZZA_CATEGORY_ID = '00000000-0000-4000-8000-0000000000a0';
+const PIZZA_SIZE_GROUP_ID = '00000000-0000-4000-8000-0000000000a1';
+const BURGER_CATEGORY_ID = '00000000-0000-4000-8000-0000000000b0';
+const BURGER_SIZE_GROUP_ID = '00000000-0000-4000-8000-0000000000b1';
+const OOMI_BURGER_CATEGORY_ID = '00000000-0000-4000-8000-0000000000c0';
+const OOMI_BURGER_SIZE_GROUP_ID = '00000000-0000-4000-8000-0000000000c1';
+const OOMI_PIZZA_CATEGORY_ID = '00000000-0000-4000-8000-0000000000d0';
+const OOMI_PIZZA_SIZE_GROUP_ID = '00000000-0000-4000-8000-0000000000d1';
 
 async function seed() {
   const password = process.env.SEED_ADMIN_PASSWORD ?? DEFAULT_ADMIN_PASSWORD;
@@ -601,6 +617,84 @@ async function seed() {
 
   console.info(
     `Seeded OOMI Kitchen demo tenant: tenant=${OOMI_TENANT_SLUG} (${oomiTenant.id}), brands=[${OOMI_BURGER_SLUG}, ${OOMI_PIZZA_SLUG}], location=oomi-kitchen, storefronts=[${OOMI_TENANT_SLUG}(tenant), ${OOMI_BURGER_SLUG}(brand), ${OOMI_PIZZA_SLUG}(brand)], menus=[OOMI Burger Menu, OOMI Pizza Menu], menu_items=4`,
+  );
+
+  // === Catalog spine (DEL-34 / X3) ===
+  // Canonical (ships to stg/prd) — gives the hospitality + OOMI showcase items
+  // real categories + a "Size" modifier group, so the ModifierSnapshot soft
+  // pointers have a source of truth. Per brand: 1 category + a single-select
+  // Size group (3 sizes). SAME-BRAND only (the DB doesn't enforce it).
+  // Idempotent via deterministic UUID PKs + onConflictDoNothing.
+  await db
+    .insert(categories)
+    .values([
+      { id: PIZZA_CATEGORY_ID, brandId: pizza.id, name: 'Pizzas' },
+      { id: BURGER_CATEGORY_ID, brandId: burger.id, name: 'Burgers' },
+      { id: OOMI_BURGER_CATEGORY_ID, brandId: oomiBurger.id, name: 'Burgers' },
+      { id: OOMI_PIZZA_CATEGORY_ID, brandId: oomiPizza.id, name: 'Pizzas' },
+    ])
+    .onConflictDoNothing({ target: categories.id });
+
+  await db
+    .insert(modifierGroups)
+    .values([
+      { id: PIZZA_SIZE_GROUP_ID, brandId: pizza.id, name: 'Size', selectionType: 'single', minSelect: 1, maxSelect: 1 },
+      { id: BURGER_SIZE_GROUP_ID, brandId: burger.id, name: 'Size', selectionType: 'single', minSelect: 1, maxSelect: 1 },
+      { id: OOMI_BURGER_SIZE_GROUP_ID, brandId: oomiBurger.id, name: 'Size', selectionType: 'single', minSelect: 1, maxSelect: 1 },
+      { id: OOMI_PIZZA_SIZE_GROUP_ID, brandId: oomiPizza.id, name: 'Size', selectionType: 'single', minSelect: 1, maxSelect: 1 },
+    ])
+    .onConflictDoNothing({ target: modifierGroups.id });
+
+  await db
+    .insert(modifiers)
+    .values([
+      // Pizza Express — Size
+      { id: '00000000-0000-4000-8000-0000000000a2', modifierGroupId: PIZZA_SIZE_GROUP_ID, name: 'Small', priceDeltaCents: -100, sortOrder: 0 },
+      { id: '00000000-0000-4000-8000-0000000000a3', modifierGroupId: PIZZA_SIZE_GROUP_ID, name: 'Regular', priceDeltaCents: 0, isDefault: true, sortOrder: 1 },
+      { id: '00000000-0000-4000-8000-0000000000a4', modifierGroupId: PIZZA_SIZE_GROUP_ID, name: 'Large', priceDeltaCents: 200, sortOrder: 2 },
+      // Burger Heaven — Size (patty count)
+      { id: '00000000-0000-4000-8000-0000000000b2', modifierGroupId: BURGER_SIZE_GROUP_ID, name: 'Single', priceDeltaCents: 0, isDefault: true, sortOrder: 0 },
+      { id: '00000000-0000-4000-8000-0000000000b3', modifierGroupId: BURGER_SIZE_GROUP_ID, name: 'Double', priceDeltaCents: 250, sortOrder: 1 },
+      { id: '00000000-0000-4000-8000-0000000000b4', modifierGroupId: BURGER_SIZE_GROUP_ID, name: 'Triple', priceDeltaCents: 500, sortOrder: 2 },
+      // OOMI Burger — Size (patty count)
+      { id: '00000000-0000-4000-8000-0000000000c2', modifierGroupId: OOMI_BURGER_SIZE_GROUP_ID, name: 'Single', priceDeltaCents: 0, isDefault: true, sortOrder: 0 },
+      { id: '00000000-0000-4000-8000-0000000000c3', modifierGroupId: OOMI_BURGER_SIZE_GROUP_ID, name: 'Double', priceDeltaCents: 250, sortOrder: 1 },
+      { id: '00000000-0000-4000-8000-0000000000c4', modifierGroupId: OOMI_BURGER_SIZE_GROUP_ID, name: 'Triple', priceDeltaCents: 500, sortOrder: 2 },
+      // OOMI Pizza — Size
+      { id: '00000000-0000-4000-8000-0000000000d2', modifierGroupId: OOMI_PIZZA_SIZE_GROUP_ID, name: 'Small', priceDeltaCents: -100, sortOrder: 0 },
+      { id: '00000000-0000-4000-8000-0000000000d3', modifierGroupId: OOMI_PIZZA_SIZE_GROUP_ID, name: 'Regular', priceDeltaCents: 0, isDefault: true, sortOrder: 1 },
+      { id: '00000000-0000-4000-8000-0000000000d4', modifierGroupId: OOMI_PIZZA_SIZE_GROUP_ID, name: 'Large', priceDeltaCents: 200, sortOrder: 2 },
+    ])
+    .onConflictDoNothing({ target: modifiers.id });
+
+  // Attach each brand's Size group to that brand's items (composite-PK idempotent).
+  await db
+    .insert(menuItemModifierGroups)
+    .values([
+      { menuItemId: PIZZA_ITEM_MARGHERITA_ID, modifierGroupId: PIZZA_SIZE_GROUP_ID },
+      { menuItemId: PIZZA_ITEM_PEPPERONI_ID, modifierGroupId: PIZZA_SIZE_GROUP_ID },
+      { menuItemId: BURGER_ITEM_CLASSIC_ID, modifierGroupId: BURGER_SIZE_GROUP_ID },
+      { menuItemId: BURGER_ITEM_CHEESE_ID, modifierGroupId: BURGER_SIZE_GROUP_ID },
+      { menuItemId: OOMI_BURGER_ITEM_SMASH_ID, modifierGroupId: OOMI_BURGER_SIZE_GROUP_ID },
+      { menuItemId: OOMI_BURGER_ITEM_TRUFFLE_ID, modifierGroupId: OOMI_BURGER_SIZE_GROUP_ID },
+      { menuItemId: OOMI_PIZZA_ITEM_MARGHERITA_ID, modifierGroupId: OOMI_PIZZA_SIZE_GROUP_ID },
+      { menuItemId: OOMI_PIZZA_ITEM_TRUFFLE_ID, modifierGroupId: OOMI_PIZZA_SIZE_GROUP_ID },
+    ])
+    .onConflictDoNothing();
+
+  // Assign each item to its brand's category (idempotent UPDATEs — additive
+  // migration left category_id NULL on existing rows).
+  await db.update(menuItems).set({ categoryId: PIZZA_CATEGORY_ID })
+    .where(inArray(menuItems.id, [PIZZA_ITEM_MARGHERITA_ID, PIZZA_ITEM_PEPPERONI_ID]));
+  await db.update(menuItems).set({ categoryId: BURGER_CATEGORY_ID })
+    .where(inArray(menuItems.id, [BURGER_ITEM_CLASSIC_ID, BURGER_ITEM_CHEESE_ID]));
+  await db.update(menuItems).set({ categoryId: OOMI_BURGER_CATEGORY_ID })
+    .where(inArray(menuItems.id, [OOMI_BURGER_ITEM_SMASH_ID, OOMI_BURGER_ITEM_TRUFFLE_ID]));
+  await db.update(menuItems).set({ categoryId: OOMI_PIZZA_CATEGORY_ID })
+    .where(inArray(menuItems.id, [OOMI_PIZZA_ITEM_MARGHERITA_ID, OOMI_PIZZA_ITEM_TRUFFLE_ID]));
+
+  console.info(
+    'Seeded catalog (DEL-34 / X3): 4 categories, 4 modifier groups, 12 modifiers, 8 item↔group links',
   );
 
   // === Test-only fixtures (DEL-8) ===

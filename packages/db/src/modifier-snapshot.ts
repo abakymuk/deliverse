@@ -3,7 +3,7 @@ import { z } from 'zod';
 /**
  * ModifierSnapshot — immutable per-line modifier record.
  *
- * Stored as jsonb on `cart_items.modifiers_json` and `order_line_items.modifiers_snapshot_json`.
+ * Stored as jsonb on `cart_items.modifiers_json` and `order_intent_items.modifiers_snapshot_json`.
  * Snapshot semantics: priceDeltaCents + name captured at add-to-cart time, never recomputed.
  * modifierGroupId + modifierId are soft pointers (no FK) — they survive hard-delete of the
  * underlying catalog row when X3 (catalog spine) lands.
