@@ -37,6 +37,9 @@ function aggregate(event: DomainEvent): { aggregateType: string; aggregateId: st
     case 'order_intent.placed':
     case 'order_intent.cancelled':
       return { aggregateType: 'order_intent', aggregateId: event.data.orderIntentId };
+    case 'payment.captured':
+    case 'payment.refunded':
+      return { aggregateType: 'payment', aggregateId: event.data.paymentId };
   }
 }
 
@@ -57,6 +60,11 @@ function idempotencyKey(event: DomainEvent): string | null {
       return event.data.orderIntentId;
     case 'order_intent.cancelled':
       return `${event.data.orderIntentId}:cancelled`;
+    // pi_… for captured, re_… for refunded — distinct namespaces, and
+    // event_type differs in the unique index, so no cross-collision.
+    case 'payment.captured':
+    case 'payment.refunded':
+      return event.data.externalId;
   }
 }
 

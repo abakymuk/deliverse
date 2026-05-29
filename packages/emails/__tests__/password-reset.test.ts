@@ -43,6 +43,8 @@ const tenantFixture = {
   logo: null,
   status: 'active' as const,
   metadata: null,
+  stripeAccountId: null,
+  stripeChargesEnabled: false,
   createdAt: new Date('2026-01-01'),
   updatedAt: new Date('2026-01-01'),
   deletedAt: null,

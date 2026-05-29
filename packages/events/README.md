@@ -8,7 +8,7 @@ Domain event substrate: Zod schemas for every event the platform emits, a transa
 - **`./writer`** — `appendEvent(tx, event)` and `appendEventAfterCommit(event)`. The only two ways to land an event row.
 - **`./inngest`** — exports the `outboxDispatcher` Inngest cron function. Registered ONCE in `apps/platform/src/app/api/inngest/route.ts` per ADR-0009 §5.
 
-## Events in v1 (DEL-29 / N2)
+## Events
 
 | Event name | Producer | Aggregate |
 |---|---|---|
@@ -17,6 +17,8 @@ Domain event substrate: Zod schemas for every event the platform emits, a transa
 | `cart.item_added` | `apps/storefront/src/app/(shop)/cart/actions.ts` (`addToCartAction`, in-tx) | `cart` |
 | `order_intent.placed` | `apps/storefront/src/app/(shop)/checkout/actions.ts` (`placeOrderAction`, in-tx) | `order_intent` |
 | `order_intent.cancelled` | _schema-only stub_ — no emission site yet (the cancel flow doesn't exist) | `order_intent` |
+| `payment.captured` | `packages/payments/src/handlers.ts` (Stripe webhook, in-tx) — _DEL-35 / X4; emission site lands in step 3_ | `payment` |
+| `payment.refunded` | `packages/payments/src/handlers.ts` (Stripe webhook, in-tx) — _DEL-35 / X4; emission site lands in step 4_ | `payment` |
 
 The order events were renamed `order.*` → `order_intent.*` in DEL-32 / X1 (Order Intent split) — a clean hard-rename (no dual-emit; there were zero live consumers).
 
@@ -93,6 +95,8 @@ Each event type derives an `idempotency_key` (or `null` for events where multipl
 | `cart.item_added` | `null` (distinct adds are distinct events) |
 | `order_intent.placed` | `orderIntentId` |
 | `order_intent.cancelled` | `${orderIntentId}:cancelled` |
+| `payment.captured` | `externalId` (Stripe PaymentIntent id, `pi_…`) |
+| `payment.refunded` | `externalId` (Stripe Refund id, `re_…`) |
 
 ## Dispatcher
 
