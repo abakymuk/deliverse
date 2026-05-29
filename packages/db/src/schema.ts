@@ -94,6 +94,13 @@ export const cartStatusEnum = pgEnum('cart_status', [
   'converted',
 ]);
 
+// DEL-34 / X3: modifier group selection mode. 'single' = pick exactly one
+// (radio); 'multi' = pick zero-to-many (checkboxes), bounded by min/max_select.
+export const modifierSelectionTypeEnum = pgEnum('modifier_selection_type', [
+  'single',
+  'multi',
+]);
+
 // DEL-32 / X1: the old single `order_status` enum conflated customer intent
 // with kitchen fulfillment. It is split into the two machines below —
 // `order_intent_status` (intent) + `fulfillment_status` (per-brand ticket).
@@ -939,8 +946,115 @@ export const menuItems = pgTable('menu_items', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+
+  // DEL-34 / X3 (additive). slug: nullable, no uniqueness yet (add a partial
+  // unique + backfill when routing/SEO consumes it). category_id: nullable FK,
+  // ON DELETE SET NULL so deleting a category doesn't delete items. No image_id
+  // yet (deferred with media_assets until an upload flow exists).
+  slug: text('slug'),
+  categoryId: uuid('category_id').references(() => categories.id, { onDelete: 'set null' }),
 }, (t) => ({
   menuIdx: index('menu_items_menu_idx').on(t.menuId),
+  categoryIdx: index('menu_items_category_idx').on(t.categoryId),
+}));
+
+// ============================================================================
+// CATALOG SPINE (DEL-34 / X3)
+// ============================================================================
+//
+// Brand-owned categories + modifiers. Tenant-safety is transitive via
+// brand.tenant_id (no direct tenant_id, same as menus/menu_items). The
+// ModifierSnapshot soft pointers (cart_items / order_intent_items) reference
+// modifier_groups.id + modifiers.id by id (no FK) — see ./modifier-snapshot.ts.
+// Same-brand integrity (an item's category/groups belong to its brand) is an
+// app-layer concern, NOT DB-enforced.
+
+/**
+ * categories — brand-owned menu sections (e.g. "Mains", "Sides").
+ */
+export const categories = pgTable('categories', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  brandId: uuid('brand_id')
+    .notNull()
+    .references(() => brands.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  sortOrder: integer('sort_order').notNull().default(0),
+  isActive: boolean('is_active').notNull().default(true),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  brandIdx: index('categories_brand_idx').on(t.brandId),
+}));
+
+/**
+ * modifier_groups — brand-owned groups of modifier options attached to menu
+ * items (e.g. "Size", "Toppings"). selection_type + min/max_select bound the
+ * choice; max_select NULL = unlimited.
+ */
+export const modifierGroups = pgTable('modifier_groups', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  brandId: uuid('brand_id')
+    .notNull()
+    .references(() => brands.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  selectionType: modifierSelectionTypeEnum('selection_type').notNull(),
+  minSelect: integer('min_select').notNull().default(0),
+  maxSelect: integer('max_select'),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  brandIdx: index('modifier_groups_brand_idx').on(t.brandId),
+}));
+
+/**
+ * modifiers — selectable options within a modifier_group. price_delta_cents
+ * may be negative (a discount); is_default pre-selects the option.
+ */
+export const modifiers = pgTable('modifiers', {
+  id: uuid('id').primaryKey().defaultRandom(),
+
+  modifierGroupId: uuid('modifier_group_id')
+    .notNull()
+    .references(() => modifierGroups.id, { onDelete: 'cascade' }),
+
+  name: text('name').notNull(),
+  priceDeltaCents: integer('price_delta_cents').notNull().default(0),
+  isDefault: boolean('is_default').notNull().default(false),
+  sortOrder: integer('sort_order').notNull().default(0),
+
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  deletedAt: timestamp('deleted_at', { withTimezone: true }),
+}, (t) => ({
+  groupIdx: index('modifiers_group_idx').on(t.modifierGroupId),
+}));
+
+/**
+ * menu_item_modifier_groups — M:N join attaching modifier_groups to menu_items.
+ * Composite PK = no duplicate links; sort_order orders the groups on an item.
+ */
+export const menuItemModifierGroups = pgTable('menu_item_modifier_groups', {
+  menuItemId: uuid('menu_item_id')
+    .notNull()
+    .references(() => menuItems.id, { onDelete: 'cascade' }),
+
+  modifierGroupId: uuid('modifier_group_id')
+    .notNull()
+    .references(() => modifierGroups.id, { onDelete: 'cascade' }),
+
+  sortOrder: integer('sort_order').notNull().default(0),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.menuItemId, t.modifierGroupId] }),
+  // Reverse lookup: "which items use this modifier group?"
+  modifierGroupIdx: index('menu_item_modifier_groups_modifier_group_idx').on(t.modifierGroupId),
 }));
 
 /**
@@ -1342,6 +1456,19 @@ export type NewMenu = typeof menus.$inferInsert;
 export type MenuItem = typeof menuItems.$inferSelect;
 export type NewMenuItem = typeof menuItems.$inferInsert;
 
+// DEL-34 / X3: catalog types
+export type Category = typeof categories.$inferSelect;
+export type NewCategory = typeof categories.$inferInsert;
+
+export type ModifierGroup = typeof modifierGroups.$inferSelect;
+export type NewModifierGroup = typeof modifierGroups.$inferInsert;
+
+export type Modifier = typeof modifiers.$inferSelect;
+export type NewModifier = typeof modifiers.$inferInsert;
+
+export type MenuItemModifierGroup = typeof menuItemModifierGroups.$inferSelect;
+export type NewMenuItemModifierGroup = typeof menuItemModifierGroups.$inferInsert;
+
 export type Cart = typeof carts.$inferSelect;
 export type NewCart = typeof carts.$inferInsert;
 
@@ -1402,6 +1529,9 @@ export const brandsRelations = relations(brands, ({ one, many }) => ({
   // DEL-24: commerce. Note: no direct menuItems relation — chain is
   // brand → menus → menu_items per ADR-0012 / spec § "Data Model Changes".
   menus: many(menus),
+  // DEL-34 / X3: catalog.
+  categories: many(categories),
+  modifierGroups: many(modifierGroups),
   cartItems: many(cartItems),
   orderIntentItems: many(orderIntentItems),
   orderFulfillments: many(orderFulfillments),
@@ -1476,12 +1606,55 @@ export const menusRelations = relations(menus, ({ one, many }) => ({
   items: many(menuItems),
 }));
 
-export const menuItemsRelations = relations(menuItems, ({ one }) => ({
+export const menuItemsRelations = relations(menuItems, ({ one, many }) => ({
   menu: one(menus, {
     fields: [menuItems.menuId],
     references: [menus.id],
   }),
+  // DEL-34 / X3: catalog. category is `one`; modifier groups are M:N via the
+  // join table (Drizzle has no direct M:N).
+  category: one(categories, {
+    fields: [menuItems.categoryId],
+    references: [categories.id],
+  }),
+  modifierGroups: many(menuItemModifierGroups),
   // No direct brand relation — chain via menu (per ADR-0012 / spec).
+}));
+
+// DEL-34 / X3: catalog relations.
+export const categoriesRelations = relations(categories, ({ one, many }) => ({
+  brand: one(brands, {
+    fields: [categories.brandId],
+    references: [brands.id],
+  }),
+  menuItems: many(menuItems),
+}));
+
+export const modifierGroupsRelations = relations(modifierGroups, ({ one, many }) => ({
+  brand: one(brands, {
+    fields: [modifierGroups.brandId],
+    references: [brands.id],
+  }),
+  modifiers: many(modifiers),
+  menuItems: many(menuItemModifierGroups),
+}));
+
+export const modifiersRelations = relations(modifiers, ({ one }) => ({
+  group: one(modifierGroups, {
+    fields: [modifiers.modifierGroupId],
+    references: [modifierGroups.id],
+  }),
+}));
+
+export const menuItemModifierGroupsRelations = relations(menuItemModifierGroups, ({ one }) => ({
+  menuItem: one(menuItems, {
+    fields: [menuItemModifierGroups.menuItemId],
+    references: [menuItems.id],
+  }),
+  modifierGroup: one(modifierGroups, {
+    fields: [menuItemModifierGroups.modifierGroupId],
+    references: [modifierGroups.id],
+  }),
 }));
 
 export const cartsRelations = relations(carts, ({ one, many }) => ({

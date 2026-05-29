@@ -1,6 +1,6 @@
 /**
  * Pure unit tests for the ModifierSnapshot Zod schema — the typed shape
- * pinned for cart_items.modifiers_json and order_line_items.modifiers_snapshot_json.
+ * pinned for cart_items.modifiers_json and order_intent_items.modifiers_snapshot_json.
  *
  * Mirrors the validation-surface style of @rp/events writer.test.ts.
  *
