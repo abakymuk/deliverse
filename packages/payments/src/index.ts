@@ -6,8 +6,8 @@
  *   - ./onboarding  createOrReuseConnectAccount, createAccountLink
  *   - ./handlers    dispatchStripeEvent + per-type handlers (pure, tx-scoped)
  *
- * Steps 3-4 add capture (payment_intent.succeeded) and refund (charge.refunded)
- * handlers that persist payments/refunds rows and emit @rp/events.
+ * Step 4 adds the refund (charge.refunded) handler; capture
+ * (payment_intent.succeeded) is wired here in step 3.
  */
 
 export { getStripe } from './client';
@@ -16,5 +16,6 @@ export { createAccountLink, createOrReuseConnectAccount } from './onboarding';
 export {
   dispatchStripeEvent,
   handleAccountUpdated,
+  handlePaymentIntentSucceeded,
   HANDLED_STRIPE_EVENT_TYPES,
 } from './handlers';
