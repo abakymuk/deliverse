@@ -15,8 +15,8 @@ export {
   domainEvent,
   guestSignedIn,
   guestSignedUp,
-  orderCancelled,
-  orderPlaced,
+  orderIntentCancelled,
+  orderIntentPlaced,
 } from './schema';
 
 export type { DomainEvent, EventMeta, EventName } from './schema';
@@ -29,10 +29,10 @@ export type {
   GuestSignedInData,
   GuestSignedUp,
   GuestSignedUpData,
-  OrderCancelled,
-  OrderCancelledData,
-  OrderPlaced,
-  OrderPlacedData,
+  OrderIntentCancelled,
+  OrderIntentCancelledData,
+  OrderIntentPlaced,
+  OrderIntentPlacedData,
 } from './types';
 
 export { appendEvent, appendEventAfterCommit } from './writer';

@@ -1,5 +1,5 @@
 import { db } from '@rp/db';
-import { orders } from '@rp/db/schema';
+import { orderIntents } from '@rp/db/schema';
 import { eq } from 'drizzle-orm';
 import { headers } from 'next/headers';
 import Link from 'next/link';
@@ -33,10 +33,11 @@ type Params = { orderId: string };
  * Next.js's server-action redirect handling, which can drop the
  * subdomain from the Host header for the post-redirect page render).
  *
- * Note: `orders.tenant_end_user_id` is NULLABLE per DEL-24 (ON DELETE
- * SET NULL — GDPR right-to-be-forgotten preserves the order without
- * the user link). A NULL value never matches a session userId, so
- * anonymized orders are inaccessible by definition.
+ * Note: `order_intents.tenant_end_user_id` is NULLABLE (ON DELETE SET NULL,
+ * carried over from the old orders table per DEL-32 / X1 — GDPR
+ * right-to-be-forgotten preserves the intent without the user link). A NULL
+ * value never matches a session userId, so anonymized intents are
+ * inaccessible by definition.
  *
  * DEL-25 PR 25c / docs/specs/food-hall-storefront.md.
  */
@@ -52,13 +53,13 @@ export default async function OrderDetailPage({
     notFound();
   }
 
-  const [order] = await db
+  const [orderIntent] = await db
     .select()
-    .from(orders)
-    .where(eq(orders.id, orderId))
+    .from(orderIntents)
+    .where(eq(orderIntents.id, orderId))
     .limit(1);
-  if (!order) notFound();
-  if (order.tenantEndUserId !== session.user.id) notFound();
+  if (!orderIntent) notFound();
+  if (orderIntent.tenantEndUserId !== session.user.id) notFound();
 
   return (
     <div className="container mx-auto p-8">
@@ -72,10 +73,10 @@ export default async function OrderDetailPage({
       </div>
       <h1 className="text-4xl font-bold">Order placed</h1>
       <p className="mt-2 text-[var(--color-muted-foreground)]">
-        Order #{order.id.slice(0, 8)}
+        Order #{orderIntent.id.slice(0, 8)}
       </p>
       <div className="mt-8">
-        <OrderSummary order={order} />
+        <OrderSummary orderIntent={orderIntent} />
       </div>
     </div>
   );

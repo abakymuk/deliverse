@@ -223,21 +223,20 @@ describe.skipIf(!HAS_DB)('outbox transactional integrity', () => {
     const { eventOutbox } = schemaModule;
     const { appendEvent } = writerModule;
 
-    // order.placed uses orderId as idempotency_key. Two appendEvent calls
-    // with the same orderId should collapse to one row via the partial
-    // unique index + onConflictDoNothing in writer.
-    const orderId = randomUUID();
+    // order_intent.placed uses orderIntentId as idempotency_key. Two
+    // appendEvent calls with the same id should collapse to one row via the
+    // partial unique index + onConflictDoNothing in writer.
+    const orderIntentId = randomUUID();
     const orderEvent = {
-      name: 'order.placed' as const,
+      name: 'order_intent.placed' as const,
       data: {
         tenantId,
         occurredAt: new Date().toISOString(),
         actorType: 'tenant_end_user' as const,
         actorId: userId,
-        orderId,
+        orderIntentId,
         cartId,
         locationId,
-        fulfillmentType: 'pickup' as const,
         totalCents: 999,
         subtotalCents: 999,
         brandIds: [brandId],
@@ -256,8 +255,8 @@ describe.skipIf(!HAS_DB)('outbox transactional integrity', () => {
       .where(
         and(
           eq(eventOutbox.tenantId, tenantId),
-          eq(eventOutbox.eventType, 'order.placed'),
-          eq(eventOutbox.aggregateId, orderId),
+          eq(eventOutbox.eventType, 'order_intent.placed'),
+          eq(eventOutbox.aggregateId, orderIntentId),
         ),
       );
     expect(events).toHaveLength(1);

@@ -34,9 +34,9 @@ function aggregate(event: DomainEvent): { aggregateType: string; aggregateId: st
       return { aggregateType: 'guest', aggregateId: event.data.userId };
     case 'cart.item_added':
       return { aggregateType: 'cart', aggregateId: event.data.cartId };
-    case 'order.placed':
-    case 'order.cancelled':
-      return { aggregateType: 'order', aggregateId: event.data.orderId };
+    case 'order_intent.placed':
+    case 'order_intent.cancelled':
+      return { aggregateType: 'order_intent', aggregateId: event.data.orderIntentId };
   }
 }
 
@@ -53,10 +53,10 @@ function idempotencyKey(event: DomainEvent): string | null {
       return event.data.sessionId;
     case 'cart.item_added':
       return null;
-    case 'order.placed':
-      return event.data.orderId;
-    case 'order.cancelled':
-      return `${event.data.orderId}:cancelled`;
+    case 'order_intent.placed':
+      return event.data.orderIntentId;
+    case 'order_intent.cancelled':
+      return `${event.data.orderIntentId}:cancelled`;
   }
 }
 

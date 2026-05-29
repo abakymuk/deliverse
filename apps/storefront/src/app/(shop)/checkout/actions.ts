@@ -6,8 +6,10 @@ import {
   cartItems,
   carts,
   menuItems,
-  orderLineItems,
-  orders,
+  orderFulfillmentItems,
+  orderFulfillments,
+  orderIntentItems,
+  orderIntents,
 } from '@rp/db/schema';
 import { safeNextPath } from '@rp/auth-core/safe-next-path';
 import { appendEvent } from '@rp/events/writer';
@@ -20,34 +22,31 @@ import { getActiveCart } from '@/lib/cart-resolver';
 import { resolveStorefrontTenantContext } from '@/lib/storefront-tenant-context';
 
 /**
- * DEL-25 PR 25c — checkout server action.
+ * Checkout server action (DEL-25; refactored for DEL-32 / X1 Order Intent split).
  *
- * Flow per docs/specs/food-hall-storefront.md §"Checkout":
+ * Flow per docs/specs/order-intent-fulfillment-split.md:
  *
  *   1. Resolve storefront context + session. Redirect if anonymous.
  *   2. Read active cart (read-only). If null, redirect to /cart.
- *      (Empty-cart guard sits OUTSIDE the transaction — calling
- *      `redirect()` inside `db.transaction()` would have the
- *      NEXT_REDIRECT throw caught by the transaction wrapper and
- *      treated as a rollback signal.)
+ *      (Empty-cart + redirect guards sit OUTSIDE the transaction — calling
+ *      `redirect()` inside `db.transaction()` would have the NEXT_REDIRECT
+ *      throw caught by the tx wrapper and treated as a rollback.)
  *   3. Open `db.transaction(async (tx) => { ... })`:
- *      a. Load cart_items joined with menu_items + brands (snapshot
- *         data).
+ *      a. Load cart_items joined with menu_items + brands (snapshot data).
  *      b. Compute totals from line items.
- *      c. Insert orders row (status='confirmed', fulfillmentType from
- *         input).
- *      d. Insert order_line_items rows with snapshots (brand_name_snapshot,
- *         menu_item_id_snapshot, name_snapshot, modifiers_snapshot_json,
- *         prices).
- *      e. **Double-submit guard.** Conditional UPDATE: `UPDATE carts SET
- *         status='converted' WHERE id=$cartId AND status='active'
- *         RETURNING id`. Zero rows ⇒ throw to abort the transaction
- *         (rolls back order + line items, preventing a duplicate order).
- *      f. Return order.id.
- *   4. **After the transaction resolves**, call `redirect('/orders/' +
- *      orderId)`. `redirect()` throws NEXT_REDIRECT; calling it inside
- *      the transaction callback would have the throw caught by Drizzle
- *      and treated as a rollback.
+ *      c. Insert ONE order_intents row (status defaults 'placed';
+ *         placed_by_actor = the authenticated guest; idempotency_key NULL —
+ *         the cart-conversion guard is the storefront dedup).
+ *      d. Insert order_intent_items (immutable snapshots).
+ *      e. Insert ONE order_fulfillments row per distinct brand (the KDS
+ *         ticket), then order_fulfillment_items mapping each line into its
+ *         brand's fulfillment.
+ *      f. Emit order_intent.placed (same tx — rolls back with the intent).
+ *      g. **Double-submit guard.** Conditional `UPDATE carts SET
+ *         status='converted' WHERE id=$cartId AND status='active'`. Zero
+ *         rows ⇒ throw to abort the tx (rolls back the whole intent).
+ *      h. Return the order_intent id.
+ *   4. **After the tx resolves**, `redirect('/orders/' + orderIntentId)`.
  */
 export async function placeOrderAction(formData: FormData): Promise<void> {
   const fulfillmentTypeRaw = formData.get('fulfillmentType');
@@ -71,7 +70,7 @@ export async function placeOrderAction(formData: FormData): Promise<void> {
 
   // 3. Atomic conversion: load lines → compute totals → insert order +
   // line items → conditionally flip cart to converted.
-  const orderId = await db.transaction(async (tx) => {
+  const orderIntentId = await db.transaction(async (tx) => {
     // a. Load cart lines with the brand + menu_item info we need for
     // snapshots.
     const lines = await tx
@@ -104,61 +103,110 @@ export async function placeOrderAction(formData: FormData): Promise<void> {
     const tipCents = 0;
     const totalCents = subtotalCents + taxCents + feeCents + tipCents;
 
-    // c. Insert the orders row.
-    const [order] = await tx
-      .insert(orders)
+    // c. Insert the order intent (aggregate root). status defaults 'placed'.
+    const [intent] = await tx
+      .insert(orderIntents)
       .values({
         tenantId: cart.tenantId,
         locationId: cart.locationId,
         tenantEndUserId,
-        status: 'confirmed',
-        fulfillmentType,
+        channel: 'storefront',
+        // X2: storefront checkout acts as the authenticated guest.
+        placedByActorType: 'tenant_end_user',
+        placedByActorId: tenantEndUserId,
+        // Storefront dedup is the cart-conversion guard (step g); the
+        // idempotency_key UNIQUE is reserved for the agent/API path (L3).
+        idempotencyKey: null,
         subtotalCents,
         taxCents,
         feeCents,
         tipCents,
         totalCents,
       })
-      .returning({ id: orders.id });
-    if (!order) {
-      throw new Error('placeOrderAction: failed to insert order');
+      .returning({ id: orderIntents.id });
+    if (!intent) {
+      throw new Error('placeOrderAction: failed to insert order intent');
     }
 
-    // d. Insert line items with snapshots.
-    await tx.insert(orderLineItems).values(
-      lines.map((l) => ({
-        orderId: order.id,
-        brandId: l.brandId,
-        brandNameSnapshot: l.brandName,
-        menuItemIdSnapshot: l.menuItemId,
-        nameSnapshot: l.menuItemName,
-        quantity: l.cartItemQty,
-        modifiersSnapshotJson: l.cartItemModifiers,
-        unitPriceCents: l.cartItemUnitPriceCents,
-        totalCents: l.cartItemUnitPriceCents * l.cartItemQty,
-      })),
+    // d. Insert intent items (immutable snapshots). Postgres preserves the
+    // VALUES order in RETURNING, so insertedItems[i] corresponds to lines[i].
+    const insertedItems = await tx
+      .insert(orderIntentItems)
+      .values(
+        lines.map((l) => ({
+          orderIntentId: intent.id,
+          brandId: l.brandId,
+          brandNameSnapshot: l.brandName,
+          menuItemIdSnapshot: l.menuItemId,
+          nameSnapshot: l.menuItemName,
+          quantity: l.cartItemQty,
+          modifiersSnapshotJson: l.cartItemModifiers,
+          unitPriceCents: l.cartItemUnitPriceCents,
+          totalCents: l.cartItemUnitPriceCents * l.cartItemQty,
+        })),
+      )
+      .returning({
+        id: orderIntentItems.id,
+        brandId: orderIntentItems.brandId,
+        quantity: orderIntentItems.quantity,
+      });
+
+    // e. One fulfillment per distinct brand in the cart (the KDS ticket).
+    const distinctBrands = Array.from(
+      new Map(lines.map((l) => [l.brandId, l.brandName])).entries(),
+    ).map(([brandId, brandName]) => ({ brandId, brandName }));
+
+    const insertedFulfillments = await tx
+      .insert(orderFulfillments)
+      .values(
+        distinctBrands.map((b) => ({
+          orderIntentId: intent.id,
+          tenantId: cart.tenantId,
+          brandId: b.brandId,
+          brandNameSnapshot: b.brandName,
+          locationId: cart.locationId,
+          fulfillmentType,
+        })),
+      )
+      .returning({ id: orderFulfillments.id, brandId: orderFulfillments.brandId });
+
+    const fulfillmentIdByBrand = new Map(
+      insertedFulfillments.map((f) => [f.brandId, f.id]),
     );
 
-    // d2. DEL-29 / N2: emit order.placed in the same tx as the order +
-    // line items. If the double-submit guard below rolls back, the event
-    // rolls back too — consumers never see a duplicate. The dispatcher
-    // publishes asynchronously. Event name renames to `order_intent.placed`
-    // when DEL-32 / X1 (Order Intent split) lands.
+    // f. Map each intent item into its brand's fulfillment ticket. v1 maps
+    // the whole line; order_fulfillment_items allows future splits/merges.
+    const fulfillmentItemValues = insertedItems.map((item) => {
+      const orderFulfillmentId = fulfillmentIdByBrand.get(item.brandId);
+      if (!orderFulfillmentId) {
+        throw new Error('placeOrderAction: no fulfillment for line item brand');
+      }
+      return {
+        orderFulfillmentId,
+        orderIntentItemId: item.id,
+        quantity: item.quantity,
+      };
+    });
+    await tx.insert(orderFulfillmentItems).values(fulfillmentItemValues);
+
+    // g. DEL-29/N2 + DEL-32/X1: emit order_intent.placed in the same tx as
+    // the intent + items + fulfillments. If the double-submit guard below
+    // rolls back, the event rolls back too — consumers never see a duplicate.
+    // The dispatcher publishes asynchronously.
     await appendEvent(tx, {
-      name: 'order.placed',
+      name: 'order_intent.placed',
       data: {
         tenantId: cart.tenantId,
         occurredAt: new Date().toISOString(),
         actorType: 'tenant_end_user',
         actorId: tenantEndUserId,
-        orderId: order.id,
+        orderIntentId: intent.id,
         cartId: cart.id,
         locationId: cart.locationId,
-        fulfillmentType,
         totalCents,
         subtotalCents,
         // Distinct brands across line items — for food-hall analytics.
-        brandIds: Array.from(new Set(lines.map((l) => l.brandId))),
+        brandIds: distinctBrands.map((b) => b.brandId),
         lineItemCount: lines.length,
       },
     });
@@ -176,7 +224,7 @@ export async function placeOrderAction(formData: FormData): Promise<void> {
       throw new Error('placeOrderAction: cart already checked out');
     }
 
-    return order.id;
+    return intent.id;
   });
 
   // 4. AFTER the transaction resolves. `redirect()` throws NEXT_REDIRECT;
@@ -184,5 +232,5 @@ export async function placeOrderAction(formData: FormData): Promise<void> {
   // by Drizzle and trigger a rollback.
   revalidatePath('/cart');
   revalidatePath('/orders');
-  redirect(`/orders/${orderId}`);
+  redirect(`/orders/${orderIntentId}`);
 }

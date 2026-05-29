@@ -28,7 +28,10 @@ import { modifierSnapshotsSchema } from '@rp/db/modifier-snapshot';
 
 // ── Common shapes ─────────────────────────────────────────────────────────
 
-const actorType = z.enum([
+// Exported so @rp/db's actorTypeEnum can be parity-tested against it (the pg
+// enum must declare the same members in the same order). See the parity test
+// in this package's tests.
+export const actorType = z.enum([
   'tenant_end_user',
   'platform_user',
   'service_account',
@@ -114,20 +117,18 @@ export const cartItemAdded = z.object({
   }),
 });
 
-// ── order.placed ──────────────────────────────────────────────────────────
+// ── order_intent.placed ─────────────────────────────────────────────────────
 //
-// Will be renamed to `order_intent.placed` in DEL-32 / X1 (Order Intent split).
-// At rename time: producer emits BOTH names for one minor-version window
-// with `event_version` bumped on the new name. Consumers migrate. Old name
-// removed in the following release.
+// DEL-32 / X1: hard-renamed from `order.placed` (no dual-emit — zero live
+// consumers). `fulfillmentType` dropped: fulfillment is now per-brand on
+// order_fulfillments (which adds 'dine_in'). orderId → orderIntentId.
 
-export const orderPlaced = z.object({
-  name: z.literal('order.placed'),
+export const orderIntentPlaced = z.object({
+  name: z.literal('order_intent.placed'),
   data: baseEvent.extend({
-    orderId: z.string().uuid(),
+    orderIntentId: z.string().uuid(),
     cartId: z.string().uuid().nullable(),
     locationId: z.string().uuid(),
-    fulfillmentType: z.enum(['pickup', 'delivery']),
     totalCents: z.number().int().nonnegative(),
     subtotalCents: z.number().int().nonnegative(),
     /** Distinct brands present across line items — for food-hall analytics. */
@@ -136,16 +137,15 @@ export const orderPlaced = z.object({
   }),
 });
 
-// ── order.cancelled ───────────────────────────────────────────────────────
+// ── order_intent.cancelled ──────────────────────────────────────────────────
 //
-// Schema-only stub for DEL-29 — no emission site exists yet. Added so a
-// future cancel flow can use the event without a schema PR. Same DEL-32
-// rename treatment as order.placed.
+// Schema-only stub — no emission site exists yet (no cancellation flow until a
+// later ticket). Hard-renamed from `order.cancelled` in DEL-32 / X1.
 
-export const orderCancelled = z.object({
-  name: z.literal('order.cancelled'),
+export const orderIntentCancelled = z.object({
+  name: z.literal('order_intent.cancelled'),
   data: baseEvent.extend({
-    orderId: z.string().uuid(),
+    orderIntentId: z.string().uuid(),
     reason: z.string().max(500).nullable(),
   }),
 });
@@ -156,8 +156,8 @@ export const domainEvent = z.discriminatedUnion('name', [
   guestSignedUp,
   guestSignedIn,
   cartItemAdded,
-  orderPlaced,
-  orderCancelled,
+  orderIntentPlaced,
+  orderIntentCancelled,
 ]);
 
 export type DomainEvent = z.infer<typeof domainEvent>;

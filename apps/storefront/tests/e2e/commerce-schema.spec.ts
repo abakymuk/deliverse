@@ -7,8 +7,8 @@ import {
   locations,
   menuItems,
   menus,
-  orderLineItems,
-  orders,
+  orderIntentItems,
+  orderIntents,
   tenantEndUsers,
   tenants,
 } from '@rp/db/schema';
@@ -134,7 +134,7 @@ test.describe
       // Guard each cleanup — if setup or a test failed mid-way, undefined IDs
       // shouldn't make teardown throw a second error and mask the original
       // failure.
-      if (orderId) await db.delete(orders).where(eq(orders.id, orderId));
+      if (orderId) await db.delete(orderIntents).where(eq(orderIntents.id, orderId));
       if (endUserId) await db.delete(tenantEndUsers).where(eq(tenantEndUsers.id, endUserId));
       if (throwawayTenantId) await db.delete(tenants).where(eq(tenants.id, throwawayTenantId));
     });
@@ -192,30 +192,30 @@ test.describe
       expect(cartBrandIds.has(pizzaBrandId)).toBe(true);
       expect(cartBrandIds.has(burgerBrandId)).toBe(true);
 
-      // === 3. Order ===
+      // === 3. Order intent (DEL-32 / X1) ===
       const subtotalCents = 1400 + 1200 * 2; // 3800
       const [order] = await db
-        .insert(orders)
+        .insert(orderIntents)
         .values({
           tenantId,
           locationId: DOWNTOWN_LOCATION_ID,
           tenantEndUserId: endUserId,
-          status: 'confirmed',
-          fulfillmentType: 'pickup',
+          placedByActorType: 'tenant_end_user',
+          placedByActorId: endUserId,
           subtotalCents,
           taxCents: 0,
           feeCents: 0,
           tipCents: 0,
           totalCents: subtotalCents,
         })
-        .returning({ id: orders.id });
-      if (!order) throw new Error('failed to insert order');
+        .returning({ id: orderIntents.id });
+      if (!order) throw new Error('failed to insert order intent');
       orderId = order.id;
 
-      // === 4. Order line items (snapshots) ===
-      await db.insert(orderLineItems).values([
+      // === 4. Order intent items (snapshots) ===
+      await db.insert(orderIntentItems).values([
         {
-          orderId: order.id,
+          orderIntentId: order.id,
           brandId: pizzaBrandId,
           brandNameSnapshot: 'Pizza Express',
           menuItemIdSnapshot: pizzaItemId,
@@ -225,7 +225,7 @@ test.describe
           totalCents: 1400,
         },
         {
-          orderId: order.id,
+          orderIntentId: order.id,
           brandId: burgerBrandId,
           brandNameSnapshot: 'Burger Heaven',
           menuItemIdSnapshot: burgerItemId,
@@ -243,14 +243,14 @@ test.describe
       // Order line items: length 2, distinct brand_ids, snapshots populated.
       const orderLines = await db
         .select({
-          brandId: orderLineItems.brandId,
-          brandNameSnapshot: orderLineItems.brandNameSnapshot,
-          nameSnapshot: orderLineItems.nameSnapshot,
-          quantity: orderLineItems.quantity,
-          totalCents: orderLineItems.totalCents,
+          brandId: orderIntentItems.brandId,
+          brandNameSnapshot: orderIntentItems.brandNameSnapshot,
+          nameSnapshot: orderIntentItems.nameSnapshot,
+          quantity: orderIntentItems.quantity,
+          totalCents: orderIntentItems.totalCents,
         })
-        .from(orderLineItems)
-        .where(eq(orderLineItems.orderId, order.id));
+        .from(orderIntentItems)
+        .where(eq(orderIntentItems.orderIntentId, order.id));
       expect(orderLines).toHaveLength(2);
 
       const orderBrandIds = new Set(orderLines.map((r) => r.brandId));
@@ -264,23 +264,23 @@ test.describe
         expect(line.nameSnapshot.length).toBeGreaterThan(0);
       }
 
-      // Cart status flipped, order status confirmed.
+      // Cart status flipped, intent status 'placed'.
       const [reloadedCart] = await db
         .select({ status: carts.status })
         .from(carts)
         .where(eq(carts.id, cart.id))
         .limit(1);
       const [reloadedOrder] = await db
-        .select({ status: orders.status, totalCents: orders.totalCents })
-        .from(orders)
-        .where(eq(orders.id, order.id))
+        .select({ status: orderIntents.status, totalCents: orderIntents.totalCents })
+        .from(orderIntents)
+        .where(eq(orderIntents.id, order.id))
         .limit(1);
       expect(reloadedCart?.status).toBe('converted');
-      expect(reloadedOrder?.status).toBe('confirmed');
+      expect(reloadedOrder?.status).toBe('placed');
       expect(reloadedOrder?.totalCents).toBe(subtotalCents);
     });
 
-    test('FK policy — throwaway tenant hard-delete cascades cleanly through orders + line items', async () => {
+    test('FK policy — throwaway tenant hard-delete cascades cleanly through order_intents + items', async () => {
       // Protects the dual-cascade-path policy: tenant deletion reaches
       // `orders` both via `orders.tenant_id CASCADE` and via `tenants →
       // tenant_end_users → orders.tenant_end_user_id SET NULL`. Postgres
@@ -372,21 +372,21 @@ test.describe
       });
 
       const [throwawayOrder] = await db
-        .insert(orders)
+        .insert(orderIntents)
         .values({
           tenantId: throwawayTenant.id,
           locationId: throwawayLocation.id,
           tenantEndUserId: throwawayEndUser.id,
-          status: 'confirmed',
-          fulfillmentType: 'pickup',
+          placedByActorType: 'tenant_end_user',
+          placedByActorId: throwawayEndUser.id,
           subtotalCents: 999,
           totalCents: 999,
         })
-        .returning({ id: orders.id });
-      if (!throwawayOrder) throw new Error('failed to insert throwaway order');
+        .returning({ id: orderIntents.id });
+      if (!throwawayOrder) throw new Error('failed to insert throwaway order intent');
 
-      await db.insert(orderLineItems).values({
-        orderId: throwawayOrder.id,
+      await db.insert(orderIntentItems).values({
+        orderIntentId: throwawayOrder.id,
         brandId: throwawayBrand.id,
         brandNameSnapshot: 'Cascade Brand',
         menuItemIdSnapshot: throwawayMenuItem.id,
@@ -457,14 +457,14 @@ test.describe
 
       const [ordersCount] = await db
         .select({ n: count() })
-        .from(orders)
-        .where(eq(orders.tenantId, throwawayTenant.id));
+        .from(orderIntents)
+        .where(eq(orderIntents.tenantId, throwawayTenant.id));
       expect(ordersCount?.n).toBe(0);
 
       const [lineItemsCount] = await db
         .select({ n: count() })
-        .from(orderLineItems)
-        .where(eq(orderLineItems.orderId, throwawayOrder.id));
+        .from(orderIntentItems)
+        .where(eq(orderIntentItems.orderIntentId, throwawayOrder.id));
       expect(lineItemsCount?.n).toBe(0);
     });
   });
