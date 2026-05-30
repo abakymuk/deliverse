@@ -6,6 +6,7 @@
  *   - ./onboarding     createOrReuseConnectAccount, createAccountLink
  *   - ./payment-intent createPaymentIntentForOrder (storefront checkout, DEL-44)
  *   - ./handlers       dispatchStripeEvent + per-type handlers (pure, tx-scoped)
+ *   - ./webhook        constructWebhookEvent (multi-secret signature check)
  */
 
 export { getStripe } from './client';
@@ -19,3 +20,4 @@ export {
   handlePaymentIntentSucceeded,
   HANDLED_STRIPE_EVENT_TYPES,
 } from './handlers';
+export { constructWebhookEvent, parseWebhookSecrets } from './webhook';

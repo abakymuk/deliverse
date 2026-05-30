@@ -13,24 +13,27 @@
  *                                       idempotency makes the retry safe)
  *
  * Node runtime (default) — @rp/db uses `postgres`, never edge. `force-dynamic`
- * so the App Router never statically optimizes this POST. The endpoint must be
- * registered in Stripe as CONNECT-ENABLED so `account.updated` (a connected-
- * account event) is delivered alongside platform events.
+ * so the App Router never statically optimizes this POST. Connected-account
+ * events (`account.updated`) require a CONNECT-scoped Stripe endpoint, which
+ * carries its own signing secret; `STRIPE_WEBHOOK_SECRET` is a comma-separated
+ * list so a connect endpoint and an account endpoint can both target this route
+ * and an event is accepted if ANY configured secret verifies it.
  */
 
 import { db } from '@rp/db';
 import {
-  dispatchStripeEvent,
-  getStripe,
   HANDLED_STRIPE_EVENT_TYPES,
   PermanentWebhookError,
+  constructWebhookEvent,
+  dispatchStripeEvent,
+  parseWebhookSecrets,
 } from '@rp/payments';
 
 export const dynamic = 'force-dynamic';
 
 // Stripe.Event, resolved structurally so the platform app needs no direct
 // `stripe` dependency (it isn't hoisted into apps/platform's node_modules).
-type StripeEvent = ReturnType<ReturnType<typeof getStripe>['webhooks']['constructEvent']>;
+type StripeEvent = ReturnType<typeof constructWebhookEvent>;
 
 export async function POST(req: Request): Promise<Response> {
   const signature = req.headers.get('stripe-signature');
@@ -38,8 +41,10 @@ export async function POST(req: Request): Promise<Response> {
     return new Response('Missing stripe-signature header', { status: 400 });
   }
 
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
-  if (!webhookSecret) {
+  // Comma-separated: a CONNECT-scoped and an account-scoped endpoint can both
+  // target this route, each with its own secret. Accept on the first match.
+  const webhookSecrets = parseWebhookSecrets(process.env.STRIPE_WEBHOOK_SECRET);
+  if (webhookSecrets.length === 0) {
     // Misconfiguration, not a client error — 500 so it's loud in logs/monitors.
     console.error('[stripe-webhook] STRIPE_WEBHOOK_SECRET is not set');
     return new Response('Webhook secret not configured', { status: 500 });
@@ -51,7 +56,7 @@ export async function POST(req: Request): Promise<Response> {
 
   let event: StripeEvent;
   try {
-    event = getStripe().webhooks.constructEvent(rawBody, signature, webhookSecret);
+    event = constructWebhookEvent(rawBody, signature, webhookSecrets);
   } catch (err) {
     console.warn('[stripe-webhook] signature verification failed', { err });
     return new Response('Invalid signature', { status: 400 });
