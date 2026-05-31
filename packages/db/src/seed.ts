@@ -184,6 +184,15 @@ async function seed() {
     throw new Error(`Failed to insert or find admin user (${ADMIN_EMAIL})`);
   }
 
+  // === Platform staff (DEL-46) ===
+  // The admin insert above uses onConflictDoNothing, so set the flag explicitly
+  // here — this keeps admin@test.local as platform staff (may act on any tenant)
+  // across re-seeds.
+  await db
+    .update(platformUsers)
+    .set({ isPlatformStaff: true })
+    .where(and(eq(platformUsers.email, ADMIN_EMAIL), isNull(platformUsers.deletedAt)));
+
   // === Platform account (BA credential shape — providerId singular, accountId = user.id) ===
   // Full composite unique on (provider_id, account_id).
   //
