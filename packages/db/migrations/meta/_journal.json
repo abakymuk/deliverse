@@ -99,6 +99,13 @@
       "when": 1780100000000,
       "tag": "0013_del_35_stripe_payments",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1780200105616,
+      "tag": "0014_del_46_platform_staff",
+      "breakpoints": true
     }
   ]
 }

@@ -216,6 +216,11 @@ export const platformUsers = pgTable('platform_users', {
   // Null = active; timestamp = soft-deleted at that moment.
   // Hard delete runs as scheduled job after retention period.
   deletedAt: timestamp('deleted_at', { withTimezone: true }),
+
+  // DEL-46: distinguishes internal platform staff (global operators who may act
+  // on any tenant) from external tenant operators. requireTenantAccess reads this
+  // fresh from the DB for money/Connect actions (apps/platform/src/lib/authz.ts).
+  isPlatformStaff: boolean('is_platform_staff').notNull().default(false),
 }, (t) => ({
   // PARTIAL UNIQUE INDEX:
   // Email unique only among non-deleted users.

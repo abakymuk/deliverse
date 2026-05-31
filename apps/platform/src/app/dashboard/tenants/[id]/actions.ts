@@ -4,9 +4,8 @@ import { db } from '@rp/db';
 import { createAccountLink, createOrReuseConnectAccount, getStripe } from '@rp/payments';
 import type { Route } from 'next';
 import { revalidatePath } from 'next/cache';
-import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
-import { auth } from '@/lib/auth';
+import { notFound, redirect } from 'next/navigation';
+import { requireTenantAccess } from '@/lib/authz';
 
 /**
  * Start (or resume) Stripe Connect onboarding for a tenant (DEL-35 / X4).
@@ -15,16 +14,11 @@ import { auth } from '@/lib/auth';
  * Account Link, and redirects the operator to Stripe. `tenantId` is bound by
  * the caller via `action.bind(null, tenant.id)`.
  *
- * AUTHZ (v1): gated on an authenticated platform session (the dashboard layout
- * already enforces login). TODO(DEL-35 follow-up): restrict to staff or an
- * admin member of THIS tenant — today any logged-in platform user can trigger
- * onboarding for any tenant id.
+ * AUTHZ (DEL-46): requireTenantAccess() restricts this to platform staff or an
+ * owner/manager of THIS tenant — everyone else gets 404 before any Stripe call.
  */
 export async function startStripeOnboardingAction(tenantId: string): Promise<void> {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    redirect('/login');
-  }
+  await requireTenantAccess(tenantId, 'startStripeOnboarding');
 
   const accountId = await createOrReuseConnectAccount(tenantId);
   const url = await createAccountLink(accountId, tenantId);
@@ -46,20 +40,21 @@ export async function startStripeOnboardingAction(tenantId: string): Promise<voi
  * `platform_user_id` is threaded via refund metadata so the webhook stamps the
  * acting admin. tenantId + paymentId are bound by the caller (form action.bind).
  *
- * AUTHZ (v1): session-gated only — same staff/tenant-admin follow-up as onboarding.
+ * AUTHZ (DEL-46): requireTenantAccess() restricts this to platform staff or an
+ * owner/manager of THIS tenant. The payment lookup is additionally tenant-scoped,
+ * so a valid id from another tenant 404s rather than refunding.
  */
 export async function refundPaymentAction(tenantId: string, paymentId: string): Promise<void> {
-  const session = await auth.api.getSession({ headers: await headers() });
-  if (!session) {
-    redirect('/login');
-  }
+  const session = await requireTenantAccess(tenantId, 'refundPayment');
 
   const payment = await db.query.payments.findFirst({
     columns: { externalId: true },
     where: (p, { and, eq }) => and(eq(p.id, paymentId), eq(p.tenantId, tenantId)),
   });
-  // Unknown / wrong-tenant payment → no-op (the UI only offers valid ids).
-  if (!payment) return;
+  // Unknown / wrong-tenant payment → 404 (no cross-tenant refund by id-guessing).
+  if (!payment) {
+    notFound();
+  }
 
   await getStripe().refunds.create({
     payment_intent: payment.externalId,

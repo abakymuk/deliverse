@@ -1,0 +1,1 @@
+ALTER TABLE "platform_users" ADD COLUMN "is_platform_staff" boolean DEFAULT false NOT NULL;
